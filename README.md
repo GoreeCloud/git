@@ -80,6 +80,10 @@ For a key explicitly authorized to **push to the same single repository**, add `
 
 A native Git remote URL from `gcgit remote ...` is compatible with this mode when its path matches the private bare repository exactly. In testing, a local SSH-command shim exercised clone/fetch and push permissions without starting a network SSH daemon. **Real host key verification, unauthenticated-key rejection, service account isolation, rate/resource controls, and host deployment remain pending.** See [SECURITY.md](SECURITY.md) and [docs/architecture.md](docs/architecture.md).
 
+### SSH staging and acceptance
+
+Before configuring a real SSH daemon or hosting private projects, follow the [reversible OpenSSH staging and security acceptance plan](docs/ssh-host-acceptance.md). It includes host-key pinning, restricted keys, denied-access tests, safeguards, and a **parser-only** optional local sshd configuration smoke test. No actual host-based SSH authorization or deployment is verified by that parser test.
+
 ## Optional browser (read-only)
 
 ```bash

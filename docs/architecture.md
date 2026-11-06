@@ -21,6 +21,10 @@
 | Git command injection / oversized metadata | argv subprocess invocation, stripped Git environment, strict repository names, 1 MiB bounded metadata stdout, timeouts and Git process-group cleanup on failure | Per-repo Git config, untrusted object parsing, filesystem quotas, and aggregate compute budgets require review |
 | Data loss | Standard Git bare repository format, recoverable via filesystem backups | No built-in backup, quota, scrub or restore automation |
 
+## Staging OpenSSH verification gate
+
+The [OpenSSH acceptance plan](ssh-host-acceptance.md) specifies a dedicated non-root service-account model, exact `authorized_keys` per-key forced-command scope, host-key verification, wrong/revoked-key and unauthorized cross-repo denial, forwarding restrictions, and staged rollback. The optional synthetic `sshd -T` dry-run uses an isolated Linux namespace and does not start an SSH server. A successful configuration parse is not equivalent to real host-level identity, network, or recovery acceptance.
+
 ## Non-goals for first milestone
 
 Not a GitHub clone, publicly deployed service, shared tenancy, OAuth provider, branch-protection policy engine, CI runner, or managed web Git transport. No external service is provisioned automatically. The optional web interface is not a write path.
