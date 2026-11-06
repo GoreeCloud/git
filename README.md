@@ -25,6 +25,7 @@ gcgit create my-private-repo
 gcgit list
 gcgit info my-private-repo
 gcgit doctor
+gcgit verify my-private-repo   # read-only Git object and reference integrity check
 ```
 
 Storage defaults to `~/.local/share/goreecloud-git/repos/my-private-repo.git` under the user running `gcgit`. Change it using `gcgit --root /path/to/private/storage ...` or `GC_GIT_ROOT`. Owner-only mode `0700` is required for the storage root and `repos/` directory. This tool will **not** silently chmod pre-existing directories.
@@ -79,6 +80,10 @@ ssh -N -L 8787:127.0.0.1:8787 admin@git.example.net
 
 Rotating the web token requires restarting the browser service. The web interface is a **development UI**, not yet certified against the canonical GoreeCloud UI token/component and full accessibility acceptance standards.
 
+## Licensing
+
+The original GoreeCloud Git source and documentation in this repository are licensed under the [MIT License](LICENSE) (SPDX: `MIT`). The implementation uses Python standard-library modules and invokes an externally installed Git executable; neither Git itself nor OpenSSH are copied into this repository or relicensed. This permissive license covers the application code, **not** the private repositories or their contents that you host with it.
+
 ## Test
 
 ```bash
@@ -99,4 +104,4 @@ Read [SECURITY.md](SECURITY.md) and [docs/architecture.md](docs/architecture.md)
 3. Canonical GC UI token/component integration, accessible browser QA and an optional remote administration API with authentication, CSRF protections, scopes, and replay protection.
 4. Repository quotas and management, signed releases, contributor workflows, Git LFS and an optional issues/PR layer.
 
-Built as an original source foundation, without third-party application source or fabricated deployment claims. Licensing will be chosen by the owner before third-party reuse.
+Built as an original source foundation, without third-party application source or fabricated deployment claims. Source and documentation are released under the MIT License; see [LICENSE](LICENSE). This choice applies only to original repository content and does not relicense third-party material.

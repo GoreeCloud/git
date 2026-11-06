@@ -76,6 +76,16 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(len(self.store.recent("native")), 1)
         self.assertEqual(self.store.recent("native")[0]["subject"], "Private test")
 
+    def test_integrity_check_empty_and_committed(self):
+        self.store.create("integrity")
+        self.store.verify("integrity")
+        with self.assertRaises(GitError):
+            self.store.verify("missing")
+
+    def test_cli_verify(self):
+        self.store.create("project")
+        self.assertEqual(run(["--root", str(self.store.root), "verify", "project"]), 0)
+
     def test_token_lifecycle(self):
         a = self.store.rotate_token()
         self.assertEqual(a, self.store.read_token())

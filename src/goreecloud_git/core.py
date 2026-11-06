@@ -117,6 +117,11 @@ class Store:
                 records.append({"sha": parts[0], "subject": parts[1][:240], "date": parts[2]})
         return records
 
+    def verify(self, name: str) -> None:
+        """Check Git object/ref integrity without modifying the repository."""
+        path = self.existing(name)
+        git("--git-dir", str(path), "fsck", "--full", "--no-reflogs", timeout=60)
+
     def ssh_url(self, name: str, host: str, user: str = "gcgit", port: int = 22) -> str:
         path = self.existing(name)
         if not SSH_HOST.fullmatch(host) or ".." in host or not SSH_USER.fullmatch(user):

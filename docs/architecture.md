@@ -28,3 +28,11 @@ Not a GitHub clone, publicly deployed service, shared tenancy, OAuth provider, b
 ## Operational acceptance gate
 
 Before hosting actual private assets: review SSH and filesystem account permissions; verify SSH host keys; test clone/push over SSH; verify access denied with unknown SSH keys and wrong web token; perform offline encrypted backup + restore; evaluate resource limits, monitoring, patch levels and incident recovery. Record the results in canonical GoreeCloud documentation only after verification.
+
+## Integrity verification
+
+`gcgit verify REPOSITORY` runs `git fsck --full --no-reflogs` against the owner-selected private bare repository. It does not repair objects, modify refs, or replace encrypted backups. A clean return is a useful local structural check, not a guarantee of disaster recovery; separately validate backups through an isolated restore drill.
+
+## Source licensing boundary
+
+The application source uses the MIT License. Git and OpenSSH are separately installed system tools, rather than bundled upstream source. No license applies by implication to private repository content uploaded by the owner.
