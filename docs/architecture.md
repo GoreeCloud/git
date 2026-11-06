@@ -6,7 +6,7 @@
 - **Private data boundary:** Bare Git repositories are stored outside the source checkout under a strict 0700 owner-controlled data root. Their `.git` object trees are never synchronized to GitHub by this application.
 - **CLI admin boundary:** `gcgit` executes directly as the repository filesystem owner. Creation/listing/configuration are local-only. There is no remote admin API.
 - **SSH Git boundary:** Git push and clone run through standard OpenSSH/Git. The operating system authenticates SSH keys; `git-shell` restricts the service account where deployed. The application itself does not authenticate Git transport clients or isolate multiple users.
-- **Web boundary:** Optional owner-only HTTP Basic login; token in a local 0600 file; requests limited to read-only repository metadata and commit history. Server refuses non-loopback binds, and returns CSP, no-cache, no-sniff, no-frame, and no-referrer headers.
+- **Web boundary:** Optional owner-only HTTP Basic login; token in a local 0600 file; requests limited to read-only repository metadata and commit history. Server refuses non-loopback binds, bounds in-flight request threads to eight, applies 10-second socket I/O timeouts, rejects overload with anonymous 503, and returns CSP, no-cache, no-sniff, no-frame, and no-referrer headers. These are single-process limits, not admission rate limiting or Git CPU quotas.
 
 ## Threats and mitigations
 
