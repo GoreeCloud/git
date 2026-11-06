@@ -29,6 +29,9 @@ def parser() -> argparse.ArgumentParser:
     ssh = sub.add_parser("serve-ssh", help="Restricted forced-command Git transport (OpenSSH only)")
     ssh.add_argument("--repo", required=True, help="Only the named private repository may be accessed")
     ssh.add_argument("--allow-push", action="store_true", help="Explicitly permit Git push as well as clone/fetch")
+    ssh.add_argument("--wall-seconds", type=int, default=600, help="Git connection wall-time limit, 1-7200 seconds (default 600)")
+    ssh.add_argument("--cpu-seconds", type=int, default=300, help="Git process CPU-time limit, 1-3600 seconds (default 300)")
+    ssh.add_argument("--memory-mib", type=int, default=2048, help="Git process virtual-memory limit, 128-16384 MiB (default 2048)")
     verify = sub.add_parser("verify", help="Check object integrity without changing repository contents")
     verify.add_argument("name")
     sub.add_parser("doctor", help="Check storage and Git prerequisites")
@@ -64,7 +67,11 @@ def run(argv: list[str] | None = None) -> int:
             serve(store, args.host, args.port)
         elif args.command == "serve-ssh":
             from .ssh import serve_ssh
-            return serve_ssh(store, args.repo, allow_push=args.allow_push)
+            return serve_ssh(
+                store, args.repo, allow_push=args.allow_push,
+                wall_seconds=args.wall_seconds, cpu_seconds=args.cpu_seconds,
+                memory_mib=args.memory_mib,
+            )
         elif args.command == "verify":
             store.verify(args.name)
             print(f"Integrity check passed: {args.name}")
