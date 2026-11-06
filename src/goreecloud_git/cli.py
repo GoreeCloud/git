@@ -26,6 +26,9 @@ def parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve-web", help="Serve read-only web interface on loopback")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8787)
+    ssh = sub.add_parser("serve-ssh", help="Restricted forced-command Git transport (OpenSSH only)")
+    ssh.add_argument("--repo", required=True, help="Only the named private repository may be accessed")
+    ssh.add_argument("--allow-push", action="store_true", help="Explicitly permit Git push as well as clone/fetch")
     verify = sub.add_parser("verify", help="Check object integrity without changing repository contents")
     verify.add_argument("name")
     sub.add_parser("doctor", help="Check storage and Git prerequisites")
@@ -59,6 +62,9 @@ def run(argv: list[str] | None = None) -> int:
                 raise ValueError("Invalid TCP port.")
             from .web import serve
             serve(store, args.host, args.port)
+        elif args.command == "serve-ssh":
+            from .ssh import serve_ssh
+            return serve_ssh(store, args.repo, allow_push=args.allow_push)
         elif args.command == "verify":
             store.verify(args.name)
             print(f"Integrity check passed: {args.name}")

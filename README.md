@@ -62,6 +62,22 @@ git clone ssh://gcgit@git.example.net:22/home/gcgit/.local/share/goreecloud-git/
 
 The displayed URL is an example based on a typical service-account home path. **No SSH server, account, DNS, firewall, certificate, or internet-facing endpoint is provisioned by this program.** The `git-shell` restricts shell commands but should be reviewed against your host's SSH forwarding and account policies. Prefer a private network or VPN for administrative access.
 
+## Per-key restricted SSH transport (development preview)
+
+GoreeCloud Git also has an optional `gcgit serve-ssh` forced-command handler. This allows **one explicitly named repository per SSH key**. Its default is **clone/fetch only**; `--allow-push` is required to enable Git receive-pack. It validates Git's `SSH_ORIGINAL_COMMAND` and directly invokes the required Git subcommand without a shell. It does **not** install or configure an SSH daemon, create keys, authenticate users, or implement a multi-user ACL.
+
+On a security-reviewed Linux host, use a dedicated non-root service account and an OpenSSH `authorized_keys` entry of this form (replace every example path and key with verified values):
+
+```text
+restrict,command="/opt/goreecloud-git/.venv/bin/gcgit --root /var/lib/goreecloud-git serve-ssh --repo my-private-repo" ssh-ed25519 <KEY_MATERIAL> owner-read-only
+```
+
+For a key explicitly authorized to **push to the same single repository**, add `--allow-push` to the forced command. Keep other keys restricted or revoked. Do not place a privileged/unrestricted SSH key alongside restricted keys for the service account. The Unix account must own the private storage and must be unable to read unrelated files.
+
+**Choose one SSH confinement architecture:** the previous `git-shell` approach directly permits Git's standard upload/receive-pack verbs and is administered outside this program. The `gcgit serve-ssh` approach requires an SSH account login shell capable of starting the Python entrypoint (not `git-shell`); compensate with an audited `authorized_keys` forced command plus OpenSSH key restrictions, disabled password logins, and a restrictive `Match User` policy. Never claim that `git-shell` can execute this custom forced command. `restrict` blocks interactive PTY and common forwarding features for that key; validate host-wide SSH policy too.
+
+A native Git remote URL from `gcgit remote ...` is compatible with this mode when its path matches the private bare repository exactly. In testing, a local SSH-command shim exercised clone/fetch and push permissions without starting a network SSH daemon. **Real host key verification, unauthenticated-key rejection, service account isolation, rate/resource controls, and host deployment remain pending.** See [SECURITY.md](SECURITY.md) and [docs/architecture.md](docs/architecture.md).
+
 ## Optional browser (read-only)
 
 ```bash
