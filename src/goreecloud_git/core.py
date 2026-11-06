@@ -115,7 +115,12 @@ class Store:
     def path(self, name: str) -> Path:
         return self.repos / (check_name(name) + ".git")
 
-    def create(self, name: str) -> Path:
+    def create(self, name: str, max_push_mib: int = 1024) -> Path:
+        # Git defaults to unlimited incoming pack sizes. Validate before
+        # reserving a private name so bad inputs never leave a partial repo.
+        if (isinstance(max_push_mib, bool) or not isinstance(max_push_mib, int)
+                or not 1 <= max_push_mib <= 16384):
+            raise ValueError("Max push size must be 1-16384 MiB.")
         self.ready()
         path = self.path(name)
         # Reserve the name *atomically*, and private from its first moment.
@@ -130,6 +135,7 @@ class Store:
         git("init", "--bare", "--initial-branch=main", str(path))
         git("--git-dir", str(path), "config", "receive.denyDeletes", "true")
         git("--git-dir", str(path), "config", "receive.denyNonFastForwards", "true")
+        git("--git-dir", str(path), "config", "receive.maxInputSize", str(max_push_mib * 1048576))
         return path
 
     def existing(self, name: str) -> Path:

@@ -22,6 +22,7 @@ python -m pip install -e .
 
 gcgit init
 gcgit create my-private-repo
+gcgit create big-data --max-push-mib 4096  # optional per-push pack limit override
 gcgit list
 gcgit info my-private-repo
 gcgit doctor
@@ -30,6 +31,8 @@ gcgit verify-all              # check every complete repository, report each fai
 ```
 
 Storage defaults to `~/.local/share/goreecloud-git/repos/my-private-repo.git` under the user running `gcgit`. Change it using `gcgit --root /path/to/private/storage ...` or `GC_GIT_ROOT`. Owner-only mode `0700` is required for the storage root, `repos/` directory, and every bare repository directory. Repository access refuses overexposed directory modes and symlinked Git `HEAD`/`config` control files without attempting to repair existing data. Git subprocesses are resolved only from the platform's fixed trusted system executable path (typically `/bin` and `/usr/bin` on Linux) and run with a minimal environment; a Git binary installed only in a custom or user-writable PATH directory will be rejected. Review the Git installation before changing host provisioning. This tool will **not** silently chmod pre-existing directories. New repository names are reserved with an exclusive, owner-private directory creation to prevent concurrent creators from overwriting a name. If Git initialization fails, the reserved directory is intentionally left private for manual investigation, not auto-deleted or reused.
+
+**Incoming push control:** New repositories set Git's `receive.maxInputSize` to **1024 MiB (1 GiB)** by default instead of Git's unlimited default. This limits the size of **each incoming pack stream**, not cumulative repository storage or filesystem usage. An owner can choose `--max-push-mib` from 1–16384 at creation. An invalid value is rejected before reserving the repository name. Existing repositories are **not migrated or changed automatically**; review their effective Git settings separately. Host disk quotas, filesystem monitoring, SSH connection limits and an off-host encrypted recovery drill are still required before hosting real private assets.
 
 The repository is a standard bare Git repository. On the **same machine and account**, test a push and clone using Git:
 
