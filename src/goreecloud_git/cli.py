@@ -66,7 +66,11 @@ def run(argv: list[str] | None = None) -> int:
             print("Git:", git("--version"))
             store.ready()
             print(f"Private storage: OK ({store.root})")
-            print("Web token:", "configured" if store.token_path().exists() else "not configured (optional)")
+            if not store.token_path().exists() and not store.token_path().is_symlink():
+                print("Web token: not configured (optional)")
+            else:
+                store.read_token()  # fail closed on weak permissions or symlinks
+                print("Web token: configured (permissions verified)")
         return 0
     except (OSError, ValueError, GitError) as exc:
         print(f"gcgit: {exc}", file=sys.stderr)

@@ -76,11 +76,23 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(len(self.store.recent("native")), 1)
         self.assertEqual(self.store.recent("native")[0]["subject"], "Private test")
 
-    def test_integrity_check_empty_and_committed(self):
+    def test_integrity_check_empty_and_missing(self):
         self.store.create("integrity")
         self.store.verify("integrity")
         with self.assertRaises(GitError):
             self.store.verify("missing")
+
+    def test_integrity_check_detects_corrupt_ref(self):
+        bare = self.store.create("corrupt")
+        (bare / "refs/heads/main").write_text("not-a-valid-object-id\n")
+        with self.assertRaises(GitError):
+            self.store.verify("corrupt")
+
+    def test_doctor_refuses_insecure_web_token(self):
+        self.store.rotate_token()
+        self.assertEqual(run(["--root", str(self.store.root), "doctor"]), 0)
+        os.chmod(self.store.token_path(), 0o644)
+        self.assertEqual(run(["--root", str(self.store.root), "doctor"]), 1)
 
     def test_cli_verify(self):
         self.store.create("project")
