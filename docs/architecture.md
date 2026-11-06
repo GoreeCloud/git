@@ -36,3 +36,11 @@ Before hosting actual private assets: review SSH and filesystem account permissi
 ## Source licensing boundary
 
 The application source uses the MIT License. Git and OpenSSH are separately installed system tools, rather than bundled upstream source. No license applies by implication to private repository content uploaded by the owner.
+
+## Restricted per-key Git SSH adapter (development preview)
+
+`gcgit serve-ssh --repo NAME` is a small permission-checking Git transport adapter intended for OpenSSH `authorized_keys` forced commands. It reads `SSH_ORIGINAL_COMMAND`, parses the untrusted Git verb and repository argument without shell expansion, and accepts exactly `git-upload-pack` (read) or, only with explicit `--allow-push`, `git-receive-pack` (write). Each key should be restricted to one named repository. It denies path traversal, alternate paths, additional arguments, arbitrary shell commands, and missing original commands. It invokes Git with argv only and sanitizes Git environment overrides.
+
+This adapter authenticates **nothing** itself: SSH host key validation, client public-key authentication, `authorized_keys` restrictions, password-login denial, network controls, user account confinement, and key revocation belong to a reviewed OpenSSH configuration. The adapter does not use a Unix login shell of `git-shell`, since such a shell cannot launch custom Python forced commands. A `git-shell` deployment is an alternative path rather than something to combine with this adapter.
+
+The local integration suite uses a test SSH-command shim to exercise a real Git remote clone/fetch, rejection of receive-pack under read-only scope, and positive push only under explicit write scope. Network OpenSSH end-to-end validation, host compromise protection, resource limits and logged access reviews are outstanding and should not be inferred from the shim.
