@@ -137,6 +137,12 @@ class Store:
         path = self.path(name)
         if path.is_symlink() or not path.is_dir():
             raise GitError("Repository not found.")
+        # The root being private is not sufficient if a bare repository was
+        # restored or chmodded with overly broad permissions. Reject it, do
+        # not silently repair unknown owner state or expose Git metadata.
+        private_directory(path)
+        if (path / "HEAD").is_symlink() or (path / "config").is_symlink():
+            raise GitError("Unsafe repository control-file symlink.")
         if git("--git-dir", str(path), "rev-parse", "--is-bare-repository") != "true":
             raise GitError("Not a valid bare repository.")
         return path
