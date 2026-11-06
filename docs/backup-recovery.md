@@ -48,6 +48,24 @@ The script creates a private bare Git fixture, pushes an original test commit, r
 
 **Still not verified:** Actual **off-host** encrypted replication, approved durable Kopia key recovery, live GoreeCloud Backup alpha API orchestration, real private Git repository restore, realistic performance/RPO/RTO, retained lifecycle data, production backup scheduling, and owner acceptance. The separate [GoreeCloud Backup](https://github.com/GoreeCloud/backup) engine remains the authority for future integrated encrypted backup/restore operations.
 
+## Optional authenticated GoreeCloud Backup API Git restore drill
+
+The separately maintained [GoreeCloud Backup](https://github.com/GoreeCloud/backup) alpha exposes a bearer-authenticated loopback job API that delegates to the independently installed Kopia CLI. `scripts/smoke-backup-api-git-recovery.py` now tests **both actual systems together** with a disposable owner-private bare Git fixture:
+
+```bash
+KOPIA_BIN=/absolute/path/to/reviewed/kopia \
+GOREECLOUD_BACKUP_BIN=/absolute/path/to/reviewed/goreecloud-backup \
+python3 scripts/smoke-backup-api-git-recovery.py
+```
+
+**Run this only inside a network-isolated disposable sandbox.** The script itself does not create a network namespace or download/install either executable. It requires absolute paths to executable files and refuses to run without both. The operator must independently inspect and build the Backup service from its current authorized source, verify the external Kopia binary's official release checksum, and ensure no host service or configured cloud repository can be reached. Neither the Backup API server nor Kopia is started by normal Python CI.
+
+The test generates fresh, synthetic Git commits, a private `gcgit` root, a synthetic web token, an ephemeral **encrypted** filesystem Kopia repository and randomly generated independent API/Kopia credentials. It launches GoreeCloud Backup bound to **loopback inside the sandbox** and authenticates each job through the real API. It checks denied unauthenticated requests and missing restore/full-verification confirmation, creates a Git snapshot while fixture writes are quiesced, waits for the Backup job to finish, and runs both **fresh-cache structural and 100% Kopia file verification** through the API. It obtains the snapshot root object ID through the snapshots job, verifies that an occupied destination is rejected without alteration, and restores to a new private root. Finally it compares the restored Git branch OID, receive-protection settings, Git fsck and native clone content, verifies restored web token bytes and rotates the token before restored use.
+
+**Verified isolated development evidence (November 6, 2026):** The authorized Linux laptop built the separate GoreeCloud Backup service from source commit `944fec373acfbf72112b0dc3f5d5f0a75dbf8e4c` using Go 1.27.3 with network module downloads disabled (the repository has no external Go dependencies). Kopia v0.23.1 Linux x64 SHA-256 was independently checked against the official release metadata (`416d0f84a3dbb321a8b2d8f0997b1a0a6e915babe79ee76fa6e4d2bd1e1c5178`). The **actual authenticated Backup API → encrypted Kopia → isolated GoreeCloud Git restore** passed under Bubblewrap `--unshare-net` with both source checkouts and binaries mounted read-only and all test data in private temporary storage. The service was stopped after the test; no real private repositories, host listeners, production Backup repository, cloud services, credentials or host configuration were modified.
+
+**Still unverified:** A physically/off-host encrypted destination and restore, password escrow/recovery under an independently authorized account, durable scheduled snapshot delivery, operator key revocation on a real host, real production source data, overall RPO/RTO, workload scalability, and founder-approved deployment. This drill does **not** license or install GoreeCloud Backup as a production service, and does not complete the disaster-recovery acceptance gate.
+
 ## Operational boundaries
 
 GoreeCloud Git's optional local web runs on TCP `127.0.0.1:8787` by default. GoreeCloud Backup's alpha dashboard also defaults to loopback port 8787; **do not launch both on the same port**. When intentionally co-locating reviewed development instances, choose a distinct loopback port (for example `gcgit serve-web --port 8788`) and keep both behind appropriate authenticated private access.
