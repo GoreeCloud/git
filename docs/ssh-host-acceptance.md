@@ -1,6 +1,6 @@
 # GoreeCloud Git — OpenSSH acceptance and reversible staging plan
 
-**Status:** Development/staging guidance only. **No service-account, sshd, key, firewall, DNS, or private-data deployment is authorized or performed by this document.** The synthetic OpenSSH config dry-run is not a real Git-over-SSH acceptance test.
+**Status:** Development/staging guidance only. **No service-account, sshd, key, firewall, DNS, or private-data deployment is authorized or performed by this document.** The parser-only smoke is not live SSH acceptance; two separate opt-in namespace-isolated live drills cover selected protocol controls without touching a real host account.
 
 ## A. Preflight
 
@@ -66,8 +66,24 @@ The live protocol checks include pinned host-key validation, native clone, unkno
 
 **Verified isolated development evidence (November 6, 2026):** On the authorized Linux laptop, OpenSSH 9.6p1, Python 3.12.3 and Git 2.43.0, this optional network-isolated live transport drill passed its listed positive/negative checks without a host-visible listener or host SSH changes. Do not present this as public service deployment or production SSH acceptance.
 
+## D.3. Optional synthetic **non-root + StrictModes yes** OpenSSH acceptance
+
+For a stronger *disposable* client/server drill, run only on an authorized non-root Linux development machine with assigned subordinate UID/GID ranges (at least 65,535 IDs), user/mount/network/PID namespaces, Git, OpenSSH, Python and standard namespace tools:
+
+```bash
+python3 scripts/smoke-sshd-strict.py
+```
+
+The script fails closed unless the caller has left the host's mount and network namespaces with authorized subordinate IDs. It mounts an isolated temporary root filesystem, mounts installed system tools **read-only** within that namespace, creates a minimal synthetic user database and ephemeral device bindings, and `chroot`s into that test root. It defines synthetic account `gcgit` (UID/GID 1001 inside the namespace, mapped to an unprivileged subordinate host identity). The synthetic OpenSSH server enforces **`StrictModes yes`, `PermitRootLogin no`, public-key-only login, restricted forwarding, and fixed forced Git commands**. Unlike D.2's simpler namespace fixture, it does **not** weaken `StrictModes`; it checks effective `sshd -T` output and independently validates private home/key/repo ownership.
+
+The opt-in live test covers host-key-pinned Git clone; denial of unknown keys, incorrect host keys, arbitrary shell commands, cross-repository access and pushes from a read-only key; successful explicit write-key push and Git fsck. It additionally confirms that an intentionally group/world-writable synthetic `.ssh` directory causes authentication denial, and removing an authorized test key revokes authentication. The fixture restores its test-only permission/key changes before proceeding. All keys, bare repos, user records, private account home, temporary root, mounts and loopback listener are disposable. The test is **not** started by normal CI; CI only compiles the script and runs pure safety tests.
+
+**Verified local result (November 6, 2026):** The authorized Linux laptop passed the actual synthetic non-root `StrictModes yes` OpenSSH drill with Python 3.12.3, Git 2.43.0 and OpenSSH 9.6p1. No host account was created; the real host's SSH daemon, ports, firewall, users, keys, mounts and private Git storage were not changed.
+
+**Acceptance boundary:** This does **not** prove that a real persistent host non-root user has been provisioned and audited, nor does it establish host firewall/VPN policy, production SSH key lifecycle, disk/cgroup quotas, monitoring, encrypted offsite recovery, or deployment approval. Those gates remain open and must be accepted independently under the reviewed host-specific plan.
+
 ## E. Rollback and evidence retention
 
 Before any future approved host changes, preserve reviewed sshd configuration and `authorized_keys` state in a private backup and maintain an independent administration channel. Revert the exact change on failure, revoke test keys, verify sshd syntax and active sessions, confirm firewall/listener state, and keep private repositories untouched. Avoid automated deletions or replacement of repository roots. Record host/version, client version, keys by **public fingerprints only**, test timestamps, exit statuses, objective evidence, and outstanding blockers. Private token/secret contents must never be committed or pasted into public issues.
 
-**Current status:** Local Git-over-SSH simulation, an isolated sshd **configuration parser**, and one disposable **namespace-isolated live OpenSSH protocol drill** have passed. The live drill proves real synthetic client/server authentication and selected positive/negative Git operations, but **not** a dedicated non-root host account, production `StrictModes yes`, real network controls, host-level quotas, key revocation, or encrypted off-host recovery. These remain open in [v0.2 issue #1](https://github.com/GoreeCloud/git/issues/1).
+**Current status:** Local Git-over-SSH simulation, isolated sshd configuration parsing, the original namespace live transport drill (synthetic namespace root with `StrictModes no`), and the stronger **synthetic non-root `StrictModes yes` live drill** have passed on the authorized development laptop. The stronger drill covers real synthetic SSH key revocation and unsafe-mode denial. **Actual host** non-root account provisioning, enforced host ownership and sshd policies, service monitoring, network controls, disk quotas, and encrypted off-host recovery remain open in [v0.2 issue #1](https://github.com/GoreeCloud/git/issues/1).
