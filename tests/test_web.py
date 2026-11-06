@@ -1,6 +1,8 @@
 """The web UI is authenticated, read-only, and escapes untrusted Git metadata."""
 import base64
+import re
 from http.client import HTTPConnection
+from urllib.parse import urlencode
 from pathlib import Path
 import tempfile
 import threading
@@ -28,14 +30,19 @@ class WebTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=3)
 
-    def request(self, path="/", method="GET", auth=None, cookie=None):
+    def request(self, path="/", method="GET", auth=None, cookie=None,
+                body=None, origin=None):
         connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
         headers = {}
         if cookie is not None:
             headers["Cookie"] = cookie
         if auth is not None:
             headers["Authorization"] = "Basic " + base64.b64encode(("owner:" + auth).encode()).decode()
-        connection.request(method, path, headers=headers)
+        if body is not None:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        if origin is not None:
+            headers["Origin"] = origin
+        connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         body = response.read().decode()
         result = (response.status, body, dict(response.getheaders()))
@@ -66,17 +73,32 @@ class WebTests(unittest.TestCase):
         self.assertIn("forced-colors:active", css)
         self.assertNotIn("--app-canvas:", css)
 
+    def csrf_value(self):
+        status, body, _ = self.request("/settings", auth=self.token)
+        self.assertEqual(status, 200)
+        match = re.search(r"name='csrf' value='([a-f0-9]{64})'", body)
+        self.assertIsNotNone(match)
+        return match.group(1)
+
+    def post_appearance(self, mode, *, csrf=None, auth="owner", origin=None):
+        form = urlencode({"mode": mode, "csrf": self.csrf_value() if csrf is None else csrf})
+        credentials = self.token if auth == "owner" else auth
+        return self.request("/settings/appearance", method="POST",
+                            auth=credentials, body=form, origin=origin)
+
     def test_appearance_is_private_persistent_and_resettable(self):
         self.assertEqual(self.request("/settings")[0], 401)
         status, body, _ = self.request("/settings", auth=self.token)
         self.assertEqual(status, 200)
         self.assertIn("data-gc-mode='light'", body)
         self.assertIn("name='mode' value='light' checked", body)
+        self.assertIn("method='post' action='/settings/appearance'", body)
         self.assertIn("Follow system", body)
-        status, _, headers = self.request("/settings/appearance?mode=dark")
-        self.assertEqual(status, 401)
-        self.assertNotIn("Set-Cookie", headers)
         status, _, headers = self.request("/settings/appearance?mode=dark", auth=self.token)
+        self.assertEqual(status, 405)
+        self.assertNotIn("Set-Cookie", headers)
+        self.assertEqual(self.post_appearance("dark", auth=None)[0], 401)
+        status, _, headers = self.post_appearance("dark")
         self.assertEqual(status, 303)
         self.assertEqual(headers["Location"], "/settings")
         self.assertIn("SameSite=Strict", headers["Set-Cookie"])
@@ -87,24 +109,36 @@ class WebTests(unittest.TestCase):
         self.assertIn("data-gc-mode='dark'", body)
         self.assertIn("name='mode' value='dark' checked", body)
         self.assertEqual(self.request("/", auth=self.token, cookie=cookie)[0], 200)
-        status, _, headers = self.request("/settings/appearance?mode=auto", auth=self.token)
+        status, _, headers = self.post_appearance("auto")
         self.assertEqual(status, 303)
         cookie = headers["Set-Cookie"].split(";", 1)[0]
         self.assertIn("data-gc-mode='auto'",
                       self.request("/settings", auth=self.token, cookie=cookie)[1])
-        status, _, headers = self.request("/settings/appearance?mode=reset", auth=self.token)
+        status, _, headers = self.post_appearance("reset")
         self.assertEqual(status, 303)
         self.assertIn("Max-Age=0", headers["Set-Cookie"])
         self.assertIn("data-gc-mode='light'", self.request("/", auth=self.token)[1])
 
     def test_invalid_appearance_parameters_fail_closed(self):
-        for query in ("", "mode=", "mode=evil", "mode=dark&mode=light",
-                      "mode=dark&extra=yes", "other=dark", "mode=%0D%0Aattack"):
-            with self.subTest(query=query):
-                status, _, headers = self.request("/settings/appearance?" + query, auth=self.token)
-                self.assertEqual(status, 400)
+        valid_csrf = self.csrf_value()
+        for body in (
+            "", "mode=", "mode=evil", "mode=dark&mode=light",
+            "mode=dark&extra=yes", "other=dark", "mode=%0D%0Aattack",
+            "mode=dark", f"mode=dark&csrf={valid_csrf}&csrf={valid_csrf}",
+            f"mode=dark&csrf={valid_csrf}&extra=yes",
+            "x" * 520,
+        ):
+            with self.subTest(body=body[:60]):
+                status, _, headers = self.request(
+                    "/settings/appearance", method="POST", auth=self.token, body=body
+                )
+                self.assertIn(status, (400, 403))
                 self.assertNotIn("Set-Cookie", headers)
                 self.assertIn("no-store", headers["Cache-Control"])
+        self.assertEqual(self.post_appearance("dark", csrf="0" * 64)[0], 403)
+        self.assertEqual(self.post_appearance("dark", origin="https://evil.example")[0], 403)
+        allowed_origin = f"http://127.0.0.1:{self.server.server_port}"
+        self.assertEqual(self.post_appearance("dark", origin=allowed_origin)[0], 303)
         status, body, _ = self.request("/", auth=self.token, cookie="gcgit_appearance=malicious")
         self.assertEqual(status, 200)
         self.assertIn("data-gc-mode='light'", body)
