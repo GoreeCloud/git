@@ -26,6 +26,8 @@ def parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve-web", help="Serve read-only web interface on loopback")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8787)
+    verify = sub.add_parser("verify", help="Check object integrity without changing repository contents")
+    verify.add_argument("name")
     sub.add_parser("doctor", help="Check storage and Git prerequisites")
     return p
 
@@ -57,6 +59,9 @@ def run(argv: list[str] | None = None) -> int:
                 raise ValueError("Invalid TCP port.")
             from .web import serve
             serve(store, args.host, args.port)
+        elif args.command == "verify":
+            store.verify(args.name)
+            print(f"Integrity check passed: {args.name}")
         elif args.command == "doctor":
             print("Git:", git("--version"))
             store.ready()
