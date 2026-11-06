@@ -68,6 +68,16 @@ git clone ssh://gcgit@git.example.net:22/home/gcgit/.local/share/goreecloud-git/
 
 The displayed URL is an example based on a typical service-account home path. **No SSH server, account, DNS, firewall, certificate, or internet-facing endpoint is provisioned by this program.** The `git-shell` restricts shell commands but should be reviewed against your host's SSH forwarding and account policies. Prefer a private network or VPN for administrative access.
 
+## Optional isolated OpenSSH acceptance drill
+
+On an authorized Linux development machine with unprivileged user, mount and network namespaces, installed OpenSSH client/server and configured subordinate UID/GID ranges, you can exercise **real** host-key-pinned Git-over-SSH authentication against a **disposable SSH daemon**:
+
+```bash
+python3 scripts/smoke-sshd-live.py
+```
+
+The script uses generated test-only keys and repositories, namespace-only loopback networking, and performs positive read/write and negative authentication/authorization tests. It does **not** install or expose a host service. It uses synthetic namespace root and, because the host filesystem root has unmapped ownership, disables `StrictModes` **in the synthetic fixture only**; production must use a non-root account and `StrictModes yes`. It is an opt-in drill, **not** run by normal CI. See [OpenSSH acceptance limits](docs/ssh-host-acceptance.md) before using results as evidence.
+
 ## Per-key restricted SSH transport (development preview)
 
 GoreeCloud Git also has an optional `gcgit serve-ssh` forced-command handler. This allows **one explicitly named repository per SSH key**. Its default is **clone/fetch only**; `--allow-push` is required to enable Git receive-pack. It validates Git's `SSH_ORIGINAL_COMMAND` and directly invokes the required Git subcommand without a shell. It does **not** install or configure an SSH daemon, create keys, authenticate users, or implement a multi-user ACL.
