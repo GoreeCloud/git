@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "goreecloud-git"
+version = "0.1.0"
+description = "Private self-hosted, CLI-first Git hosting with an optional read-only web interface"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+gcgit = "goreecloud_git.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
