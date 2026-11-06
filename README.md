@@ -78,7 +78,7 @@ On an authorized Linux development machine with unprivileged user, mount and net
 python3 scripts/smoke-sshd-live.py
 ```
 
-The script uses generated test-only keys and repositories, namespace-only loopback networking, and performs positive read/write and negative authentication/authorization tests. It does **not** install or expose a host service. It uses synthetic namespace root and, because the host filesystem root has unmapped ownership, disables `StrictModes` **in the synthetic fixture only**; production must use a non-root account and `StrictModes yes`. It is an opt-in drill, **not** run by normal CI. See [OpenSSH acceptance limits](docs/ssh-host-acceptance.md) before using results as evidence.
+The script uses generated test-only keys and repositories, namespace-only loopback networking, and performs positive read/write and negative authentication/authorization tests. On a suitable development machine, the **stronger separate drill** `python3 scripts/smoke-sshd-strict.py` additionally uses a temporary chroot and synthetic non-root `gcgit` account with **effective `StrictModes yes`**, tests unsafe-key-directory rejection and revoked-key denial, and never modifies a real host account or SSH service. It does **not** install or expose a host service. It uses synthetic namespace root and, because the host filesystem root has unmapped ownership, disables `StrictModes` **in the synthetic fixture only**; production must use a non-root account and `StrictModes yes`. It is an opt-in drill, **not** run by normal CI. See [OpenSSH acceptance limits](docs/ssh-host-acceptance.md) before using results as evidence.
 
 ## Per-key restricted SSH transport (development preview)
 
