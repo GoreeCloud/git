@@ -50,6 +50,8 @@ git clone "$HOME/.local/share/goreecloud-git/repos/my-private-repo.git" check-cl
 
 This example creates a disposable demonstration commit. Run it only in a suitable development environment; do not push secrets.
 
+**Preflight inspection:** `gcgit doctor` now additionally checks every managed `.git` entry for owner-private directory modes, valid Git control files, symlinks, and interrupted repository creation reservations. It reports failures with a nonzero exit code and **never** deletes, changes modes, or repairs them. This basic access audit does not run Git fsck.
+
 **Maintenance integrity sweep:** `gcgit verify-all` sequentially runs the same read-only Git fsck check on each discovered complete private bare repository. It continues after corrupt repositories and exits nonzero if any check fails. An empty store is reported explicitly. Incomplete reserved creation directories are deliberately not included, and an integrity sweep does not prove that off-site encrypted backups are restorable. Run manually during a reviewed maintenance window for large repositories; no scheduler or network service is installed.
 
 ## Native SSH Git access

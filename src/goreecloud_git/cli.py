@@ -102,6 +102,12 @@ def run(argv: list[str] | None = None) -> int:
             else:
                 store.read_token()  # fail closed on weak permissions or symlinks
                 print("Web token: configured (permissions verified)")
+            issues = store.inventory_issues()
+            if issues:
+                for name in issues:
+                    print(f"Repository inventory needs review: {name}", file=sys.stderr)
+                return 1
+            print("Repository inventory: basic access checks passed (not Git fsck)")
         return 0
     except (OSError, ValueError, GitError) as exc:
         print(f"gcgit: {exc}", file=sys.stderr)
