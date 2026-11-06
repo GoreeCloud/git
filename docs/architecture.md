@@ -35,7 +35,7 @@ Before hosting actual private assets: review SSH and filesystem account permissi
 
 ## Integrity verification
 
-`gcgit verify REPOSITORY` runs `git fsck --full --no-reflogs` against the owner-selected private bare repository. It does not repair objects, modify refs, or replace encrypted backups. A clean return is a useful local structural check, not a guarantee of disaster recovery; separately validate backups through an isolated restore drill.
+`gcgit verify REPOSITORY` runs `git fsck --full --no-reflogs` against the owner-selected private bare repository. `gcgit verify-all` runs the same bounded, sequential checks for all discovered complete private repositories, reports both success and failure by repository name, continues after corruption, and returns a nonzero exit code when any repository fails. Empty storage is clearly reported. The sweep does not scan incomplete reserved create directories or prove backup completeness. Neither command repairs objects, modifies refs, schedules background checks, or replaces encrypted backups. A clean return is a local structural check, not a guarantee of disaster recovery; validate through an isolated encrypted restore drill.
 
 ## Cross-product encrypted recovery plan
 

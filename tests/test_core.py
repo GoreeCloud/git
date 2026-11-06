@@ -1,5 +1,7 @@
 """Integration tests use real Git but isolated temporary private directories."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 import os
 from pathlib import Path
 import stat
@@ -136,6 +138,39 @@ class StoreTests(unittest.TestCase):
     def test_cli_verify(self):
         self.store.create("project")
         self.assertEqual(run(["--root", str(self.store.root), "verify", "project"]), 0)
+
+    def test_cli_verify_all_healthy_repositories(self):
+        self.store.create("alpha")
+        self.store.create("beta")
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = run(["--root", str(self.store.root), "verify-all"])
+        self.assertEqual(code, 0)
+        self.assertIn("PASS: alpha", out.getvalue())
+        self.assertIn("PASS: beta", out.getvalue())
+        self.assertIn("Integrity sweep: 2/2 passed.", out.getvalue())
+        self.assertEqual(err.getvalue(), "")
+
+    def test_cli_verify_all_continues_after_corruption(self):
+        corrupt = self.store.create("alpha")
+        self.store.create("beta")
+        (corrupt / "refs/heads/main").write_text("not-a-valid-object-id\n")
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = run(["--root", str(self.store.root), "verify-all"])
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL: alpha", err.getvalue())
+        self.assertIn("PASS: beta", out.getvalue())
+        self.assertIn("Integrity sweep: 1/2 passed.", out.getvalue())
+        self.assertNotIn(str(self.store.root), err.getvalue())
+
+    def test_cli_verify_all_empty_root_is_explicit(self):
+        out = StringIO()
+        with redirect_stdout(out):
+            code = run(["--root", str(self.store.root), "verify-all"])
+        self.assertEqual(code, 0)
+        self.assertIn("No complete private repositories to verify.", out.getvalue())
+        self.assertIn("Integrity sweep: 0/0 passed.", out.getvalue())
 
     def test_token_lifecycle(self):
         a = self.store.rotate_token()
