@@ -33,6 +33,14 @@ Before hosting actual private assets: review SSH and filesystem account permissi
 
 `gcgit verify REPOSITORY` runs `git fsck --full --no-reflogs` against the owner-selected private bare repository. It does not repair objects, modify refs, or replace encrypted backups. A clean return is a useful local structural check, not a guarantee of disaster recovery; separately validate backups through an isolated restore drill.
 
+## Cross-product encrypted recovery plan
+
+GoreeCloud Backup already has a Kopia-based encrypted snapshot foundation, so GoreeCloud Git will not duplicate its encryption, scheduling or restore engine. See [backup and isolated recovery acceptance](backup-recovery.md) for a disposable-data runbook, quiesced Git write requirement, owner-private source and off-host destination boundaries, and verification of restored Git objects and refs. **No encrypted Git snapshot has been restored or deployed as part of this source development.**
+
+## Cross-product encrypted recovery plan
+
+GoreeCloud Backup already has a Kopia-based encrypted snapshot foundation, so GoreeCloud Git will not duplicate its encryption, scheduling or restore engine. See [backup and isolated recovery acceptance](backup-recovery.md) for a disposable-data runbook, quiesced Git write requirement, owner-private source and off-host destination boundaries, and verification of restored Git objects and refs. **No encrypted Git snapshot has been restored or deployed as part of this source development.**
+
 ## Source licensing boundary
 
 The application source uses the MIT License. Git and OpenSSH are separately installed system tools, rather than bundled upstream source. No license applies by implication to private repository content uploaded by the owner.
