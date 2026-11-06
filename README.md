@@ -26,6 +26,7 @@ gcgit list
 gcgit info my-private-repo
 gcgit doctor
 gcgit verify my-private-repo   # read-only Git object and reference integrity check
+gcgit verify-all              # check every complete repository, report each failure
 ```
 
 Storage defaults to `~/.local/share/goreecloud-git/repos/my-private-repo.git` under the user running `gcgit`. Change it using `gcgit --root /path/to/private/storage ...` or `GC_GIT_ROOT`. Owner-only mode `0700` is required for the storage root and `repos/` directory. This tool will **not** silently chmod pre-existing directories. New repository names are reserved with an exclusive, owner-private directory creation to prevent concurrent creators from overwriting a name. If Git initialization fails, the reserved directory is intentionally left private for manual investigation, not auto-deleted or reused.
@@ -45,6 +46,8 @@ git clone "$HOME/.local/share/goreecloud-git/repos/my-private-repo.git" check-cl
 ```
 
 This example creates a disposable demonstration commit. Run it only in a suitable development environment; do not push secrets.
+
+**Maintenance integrity sweep:** `gcgit verify-all` sequentially runs the same read-only Git fsck check on each discovered complete private bare repository. It continues after corrupt repositories and exits nonzero if any check fails. An empty store is reported explicitly. Incomplete reserved creation directories are deliberately not included, and an integrity sweep does not prove that off-site encrypted backups are restorable. Run manually during a reviewed maintenance window for large repositories; no scheduler or network service is installed.
 
 ## Native SSH Git access
 

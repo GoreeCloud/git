@@ -34,6 +34,7 @@ def parser() -> argparse.ArgumentParser:
     ssh.add_argument("--memory-mib", type=int, default=2048, help="Git process virtual-memory limit, 128-16384 MiB (default 2048)")
     verify = sub.add_parser("verify", help="Check object integrity without changing repository contents")
     verify.add_argument("name")
+    sub.add_parser("verify-all", help="Check all complete private repositories, reporting every failure")
     sub.add_parser("doctor", help="Check storage and Git prerequisites")
     return p
 
@@ -75,6 +76,21 @@ def run(argv: list[str] | None = None) -> int:
         elif args.command == "verify":
             store.verify(args.name)
             print(f"Integrity check passed: {args.name}")
+        elif args.command == "verify-all":
+            names = store.names()
+            failed = 0
+            for name in names:
+                try:
+                    store.verify(name)
+                except (GitError, OSError):
+                    failed += 1
+                    print(f"FAIL: {name}", file=sys.stderr)
+                else:
+                    print(f"PASS: {name}")
+            if not names:
+                print("No complete private repositories to verify.")
+            print(f"Integrity sweep: {len(names) - failed}/{len(names)} passed.")
+            return 1 if failed else 0
         elif args.command == "doctor":
             print("Git:", git("--version"))
             store.ready()
