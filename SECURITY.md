@@ -9,7 +9,7 @@ This is an early-development, single-owner self-hosted service. **Do not deploy 
 - The optional browser is read-only and requires owner Basic authentication using a locally stored high-entropy token. It only binds to loopback; use an SSH tunnel or a separately configured TLS reverse proxy with proper access controls for remote viewing. Browser Basic auth may cache credentials.
 - The web token is readable by the server operating-system account and must be protected from backups, accidental copying, and logging. Rotating it requires restarting the web service. Use short-lived SSH forwarding rather than exposing an HTTP port to the Internet.
 - Git hooks and pushed content should be treated as untrusted. Never automatically execute hooks from untrusted repositories in privileged contexts. Use a non-root service account.
-- Maintain off-site encrypted backups of the private repository storage and periodically test restores. No backup automation is provided in this version.
+- Maintain off-site encrypted backups of the private repository storage and periodically test restores. No backup automation is provided in this version. [Backup integration/recovery plan](docs/backup-recovery.md) explicitly reuses GoreeCloud Backup/Kopia and requires isolated restore acceptance, not unencrypted file sync. Backups of the private root may contain the web-token file; protect ciphertext/credentials and rotate a restored token before service use.
 - Do not expose port 8787 publicly, weaken filesystem modes, or share a dedicated SSH account among untrusted users.
 
 Report vulnerabilities privately to the repository owner. Do not publish exploitation details or credentials in a public issue.

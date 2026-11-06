@@ -100,6 +100,14 @@ Rotating the web token requires restarting the browser service. The web interfac
 
 The original GoreeCloud Git source and documentation in this repository are licensed under the [MIT License](LICENSE) (SPDX: `MIT`). The implementation uses Python standard-library modules and invokes an externally installed Git executable; neither Git itself nor OpenSSH are copied into this repository or relicensed. This permissive license covers the application code, **not** the private repositories or their contents that you host with it.
 
+## Private backup and recovery integration
+
+GoreeCloud Git plans to integrate with the existing [GoreeCloud Backup](https://github.com/GoreeCloud/backup) alpha and its externally installed encrypted Kopia snapshot repository rather than developing another backup engine. Read the [disposable encrypted backup/restore acceptance procedure](docs/backup-recovery.md), including the important requirements to quiesce writes, protect token-bearing snapshots, restore into a new root and test Git refs/clone. **No live encrypted Git backup or restore has been verified.**
+
+## Private backup and recovery integration
+
+GoreeCloud Git plans to integrate with the existing [GoreeCloud Backup](https://github.com/GoreeCloud/backup) alpha and its externally installed encrypted Kopia snapshot repository rather than developing another backup engine. Read the [disposable encrypted backup/restore acceptance procedure](docs/backup-recovery.md), including the important requirements to quiesce writes, protect token-bearing snapshots, restore into a new root and test Git refs/clone. **No live encrypted Git backup or restore has been verified.**
+
 ## Test
 
 ```bash
