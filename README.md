@@ -96,15 +96,11 @@ ssh -N -L 8787:127.0.0.1:8787 admin@git.example.net
 # Then open http://127.0.0.1:8787 locally.
 ```
 
-Rotating the web token requires restarting the browser service. The web interface is a **development UI**, not yet certified against the canonical GoreeCloud UI token/component and full accessibility acceptance standards.
+Rotating the web token requires restarting the browser service. The browser now consumes verified **GoreeCloud UI v1 semantic color and layout roles**, defaults to **Light** even on a dark-preferring OS, and offers authenticated **Appearance** settings for persistent Light, Dark, or explicitly selected Follow system. The non-secret choice is saved only as a SameSite=Strict/HttpOnly cookie; it never stores Git data, credentials, or private repo history. The browser remains a **development UI** with full visual, viewport, keyboard/screen-reader and WCAG acceptance outstanding. See [GC UI consumer alignment](docs/gc-ui-consumer.md).
 
 ## Licensing
 
 The original GoreeCloud Git source and documentation in this repository are licensed under the [MIT License](LICENSE) (SPDX: `MIT`). The implementation uses Python standard-library modules and invokes an externally installed Git executable; neither Git itself nor OpenSSH are copied into this repository or relicensed. This permissive license covers the application code, **not** the private repositories or their contents that you host with it.
-
-## Private backup and recovery integration
-
-GoreeCloud Git plans to integrate with the existing [GoreeCloud Backup](https://github.com/GoreeCloud/backup) alpha and its externally installed encrypted Kopia snapshot repository rather than developing another backup engine. Read the [disposable encrypted backup/restore acceptance procedure](docs/backup-recovery.md), including the important requirements to quiesce writes, protect token-bearing snapshots, restore into a new root and test Git refs/clone. **No live encrypted Git backup or restore has been verified.**
 
 ## Private backup and recovery integration
 

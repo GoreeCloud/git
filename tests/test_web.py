@@ -28,9 +28,11 @@ class WebTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=3)
 
-    def request(self, path="/", method="GET", auth=None):
+    def request(self, path="/", method="GET", auth=None, cookie=None):
         connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
         headers = {}
+        if cookie is not None:
+            headers["Cookie"] = cookie
         if auth is not None:
             headers["Authorization"] = "Basic " + base64.b64encode(("owner:" + auth).encode()).decode()
         connection.request(method, path, headers=headers)
@@ -45,6 +47,67 @@ class WebTests(unittest.TestCase):
             self.assertEqual(self.request(path)[0], 401)
         self.assertEqual(self.request(auth="bad")[0], 401)
         self.assertEqual(self.request(auth=self.token)[0], 200)
+
+    def test_gc_ui_semantics_and_light_first(self):
+        status, body, headers = self.request("/", auth=self.token)
+        self.assertEqual(status, 200)
+        self.assertIn("data-gc-mode='light'", body)
+        self.assertIn("Skip to content", body)
+        self.assertIn("aria-current='page'", body)
+        self.assertIn("<nav aria-label='Primary navigation'>", body)
+        self.assertNotIn("<script", body)
+        self.assertIn("form-action 'self'", headers["Content-Security-Policy"])
+        status, css, _ = self.request("/assets/site.css", auth=self.token)
+        self.assertEqual(status, 200)
+        self.assertIn("--gc-v1-color-canvas:#ECF0F8", css)
+        self.assertIn("--gc-v1-color-canvas:#10131E", css)
+        self.assertIn(':root[data-gc-mode="dark"]', css)
+        self.assertIn(':root[data-gc-mode="auto"]', css)
+        self.assertIn("forced-colors:active", css)
+        self.assertNotIn("--app-canvas:", css)
+
+    def test_appearance_is_private_persistent_and_resettable(self):
+        self.assertEqual(self.request("/settings")[0], 401)
+        status, body, _ = self.request("/settings", auth=self.token)
+        self.assertEqual(status, 200)
+        self.assertIn("data-gc-mode='light'", body)
+        self.assertIn("name='mode' value='light' checked", body)
+        self.assertIn("Follow system", body)
+        status, _, headers = self.request("/settings/appearance?mode=dark")
+        self.assertEqual(status, 401)
+        self.assertNotIn("Set-Cookie", headers)
+        status, _, headers = self.request("/settings/appearance?mode=dark", auth=self.token)
+        self.assertEqual(status, 303)
+        self.assertEqual(headers["Location"], "/settings")
+        self.assertIn("SameSite=Strict", headers["Set-Cookie"])
+        self.assertIn("HttpOnly", headers["Set-Cookie"])
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        status, body, _ = self.request("/settings", auth=self.token, cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertIn("data-gc-mode='dark'", body)
+        self.assertIn("name='mode' value='dark' checked", body)
+        self.assertEqual(self.request("/", auth=self.token, cookie=cookie)[0], 200)
+        status, _, headers = self.request("/settings/appearance?mode=auto", auth=self.token)
+        self.assertEqual(status, 303)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        self.assertIn("data-gc-mode='auto'",
+                      self.request("/settings", auth=self.token, cookie=cookie)[1])
+        status, _, headers = self.request("/settings/appearance?mode=reset", auth=self.token)
+        self.assertEqual(status, 303)
+        self.assertIn("Max-Age=0", headers["Set-Cookie"])
+        self.assertIn("data-gc-mode='light'", self.request("/", auth=self.token)[1])
+
+    def test_invalid_appearance_parameters_fail_closed(self):
+        for query in ("", "mode=", "mode=evil", "mode=dark&mode=light",
+                      "mode=dark&extra=yes", "other=dark", "mode=%0D%0Aattack"):
+            with self.subTest(query=query):
+                status, _, headers = self.request("/settings/appearance?" + query, auth=self.token)
+                self.assertEqual(status, 400)
+                self.assertNotIn("Set-Cookie", headers)
+                self.assertIn("no-store", headers["Cache-Control"])
+        status, body, _ = self.request("/", auth=self.token, cookie="gcgit_appearance=malicious")
+        self.assertEqual(status, 200)
+        self.assertIn("data-gc-mode='light'", body)
 
     def test_repository_overview_and_detail(self):
         status, body, headers = self.request(auth=self.token)
