@@ -14,6 +14,8 @@ This is an early-development, single-owner self-hosted service. **Do not deploy 
 - Maintain off-site encrypted backups of the private repository storage and periodically test restores. No backup automation is provided in this version. [Backup integration/recovery plan](docs/backup-recovery.md) explicitly reuses GoreeCloud Backup/Kopia and requires isolated restore acceptance, not unencrypted file sync. Backups of the private root may contain the web-token file; protect ciphertext/credentials and rotate a restored token before service use.
 - Do not expose port 8787 publicly, weaken filesystem modes, or share a dedicated SSH account among untrusted users.
 
+For real-host `sshd` account, key, host-key, firewall, and rollback acceptance, review [OpenSSH staging and security acceptance](docs/ssh-host-acceptance.md). The optional synthetic Linux `sshd -T` smoke test checks parsed configuration without starting a daemon; it does not prove actual authentication or non-root account confinement.
+
 Report vulnerabilities privately to the repository owner. Do not publish exploitation details or credentials in a public issue.
 ## Optional forced-command SSH restrictions (development)
 
