@@ -1,10 +1,12 @@
 """Integration tests use real Git but isolated temporary private directories."""
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import stat
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from goreecloud_git.cli import run
 from goreecloud_git.core import GitError, Store, check_name
@@ -31,6 +33,43 @@ class StoreTests(unittest.TestCase):
             self.store.create("my-project")
         self.assertEqual(subprocess.check_output(
             ["git", "--git-dir", str(bare), "config", "--get", "receive.denyDeletes"], text=True).strip(), "true")
+
+    def test_create_is_atomic_under_concurrent_requests(self):
+        def attempt(_):
+            try:
+                self.store.create("same-name")
+                return True
+            except GitError as exc:
+                self.assertIn("already exists", str(exc))
+                return False
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            outcomes = list(pool.map(attempt, range(12)))
+        self.assertEqual(outcomes.count(True), 1)
+        self.assertEqual(outcomes.count(False), 11)
+        self.assertEqual(self.store.names(), ["same-name"])
+        self.assertEqual(self.store.info("same-name")["commits"], 0)
+        self.assertEqual(stat.S_IMODE(self.store.path("same-name").stat().st_mode), 0o700)
+
+    def test_create_never_overwrites_existing_directory(self):
+        existing = self.store.path("occupied")
+        existing.mkdir(mode=0o700)
+        sentinel = existing / "leave-me"
+        sentinel.write_text("original data")
+        with self.assertRaises(GitError):
+            self.store.create("occupied")
+        self.assertEqual(sentinel.read_text(), "original data")
+
+    def test_failed_creation_preserves_private_reserved_path(self):
+        with patch("goreecloud_git.core.git", side_effect=GitError("test init failed")):
+            with self.assertRaises(GitError):
+                self.store.create("broken")
+        reserved = self.store.path("broken")
+        self.assertTrue(reserved.is_dir())
+        self.assertEqual(stat.S_IMODE(reserved.stat().st_mode), 0o700)
+        self.assertEqual(self.store.names(), [])  # incomplete entries not advertised
+        with self.assertRaises(GitError):
+            self.store.create("broken")  # never silently reuse unknown content
 
     def test_invalid_names_and_traversal(self):
         for name in ("", "..", ".", "x/y", "../bad", "name.git", "a." , "a b", "a\n", "a"*64, "-bad"):
