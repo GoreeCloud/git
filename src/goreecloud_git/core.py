@@ -12,6 +12,8 @@ import tempfile
 import time
 from urllib.parse import quote
 
+from .git_environment import git_binary, git_environment
+
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}\Z", re.ASCII)
 SSH_USER = re.compile(r"[a-z_][a-z0-9_-]{0,31}\Z")
 SSH_HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}\Z")
@@ -34,14 +36,13 @@ def git(*args: str, timeout: int = 12, max_output: int = 1048576) -> str:
     """
     if timeout <= 0 or not 1 <= max_output <= 1048576:
         raise ValueError("Invalid Git command budget.")
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-                "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0",
-                "GIT_NO_REPLACE_OBJECTS": "1", "GIT_PAGER": "cat"})
+    executable = git_binary()
+    if executable is None:
+        raise GitError("Git is not installed in the trusted system path.")
     try:
         proc = subprocess.Popen(
-            ["git", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, env=env, start_new_session=True,
+            [executable, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, env=git_environment(), start_new_session=True,
         )
     except FileNotFoundError as exc:
         raise GitError("Git is not installed.") from exc

@@ -13,6 +13,7 @@ import signal
 import subprocess
 
 from .core import GitError, Store, check_name
+from .git_environment import git_binary, git_environment
 
 DEFAULT_WALL_SECONDS = 600
 DEFAULT_CPU_SECONDS = 300
@@ -99,17 +100,15 @@ def serve_ssh(
     operation, path = parse_request(
         store, os.environ.get("SSH_ORIGINAL_COMMAND"), allowed_repo, allow_push
     )
-    # Git never runs inside an interpolated shell. Preserve stdin/stdout/stderr
-    # for the native wire protocol, but deny client-supplied GIT_* overrides.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env.update(
-        GIT_CONFIG_NOSYSTEM="1",
-        GIT_CONFIG_GLOBAL=os.devnull,
-        GIT_TERMINAL_PROMPT="0",
-        GIT_NO_REPLACE_OBJECTS="1",
-        GIT_OPTIONAL_LOCKS="0",
-    )
+    # Git never runs inside an interpolated shell. Its trusted executable
+    # path and minimal child environment exclude client-influenced PATH,
+    # dynamic linker, Python, and Git configuration overrides. The SSH
+    # protocol v2 hint is forwarded only if it is exactly understood.
+    executable = git_binary()
+    if executable is None:
+        raise GitError("Git is not installed in the trusted system path.")
     return _run_transport(
-        ["git", operation.removeprefix("git-"), str(path)],
-        env, wall_seconds, cpu_seconds, memory_mib,
+        [executable, operation.removeprefix("git-"), str(path)],
+        git_environment(allow_ssh_protocol=True),
+        wall_seconds, cpu_seconds, memory_mib,
     )
