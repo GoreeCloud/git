@@ -68,10 +68,16 @@ class Store:
     def create(self, name: str) -> Path:
         self.ready()
         path = self.path(name)
-        if path.exists() or path.is_symlink():
-            raise GitError("Repository already exists.")
+        # Reserve the name *atomically*, and private from its first moment.
+        # A check-then-init sequence allows two creators to race. Never chmod
+        # or overwrite somebody else's pre-existing path (including symlinks).
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError as exc:
+            raise GitError("Repository already exists.") from exc
+        # A failed Git initialization intentionally leaves a private, reserved
+        # directory for owner inspection; never delete an unknown directory.
         git("init", "--bare", "--initial-branch=main", str(path))
-        path.chmod(0o700)
         git("--git-dir", str(path), "config", "receive.denyDeletes", "true")
         git("--git-dir", str(path), "config", "receive.denyNonFastForwards", "true")
         return path
@@ -92,9 +98,14 @@ class Store:
             if candidate.is_symlink() or not candidate.is_dir() or not candidate.name.endswith(".git"):
                 continue
             try:
-                result.append(check_name(candidate.name[:-4]))
+                name = check_name(candidate.name[:-4])
             except ValueError:
                 continue
+            # An interrupted create may leave a reserved empty directory.
+            # Do not present that incomplete directory as a usable repository.
+            if not (candidate / "HEAD").is_file() or not (candidate / "config").is_file():
+                continue
+            result.append(name)
         return sorted(result, key=str.casefold)
 
     def info(self, name: str) -> dict[str, object]:

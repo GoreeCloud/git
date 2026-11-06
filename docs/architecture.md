@@ -12,7 +12,7 @@
 
 | Threat | Current mitigation | Remaining risk |
 | --- | --- | --- |
-| Path traversal via repo name | Strict name regex, no slash, no shell interpolation | Same-host owner process is trusted |
+| Path traversal / concurrent repo creation | Strict name regex, no shell interpolation; exclusive 0700 directory reservation prevents name-collision overwrites | Same-host owner process is trusted; interrupted creates may leave private reserved directories requiring investigation |
 | Symlink escape | Reject symlink repository directories and token symlink | Local owner-level races and compromised host are out of scope |
 | Accidental exposure | Default 0700 root, private token 0600, loopback-only web | SSH, network, account and backup configuration are operator-managed |
 | Force-push or branch deletion | `receive.denyNonFastForwards` and `receive.denyDeletes` set on creation | Admin can alter Git config; branch ACL not implemented |

@@ -28,7 +28,7 @@ gcgit doctor
 gcgit verify my-private-repo   # read-only Git object and reference integrity check
 ```
 
-Storage defaults to `~/.local/share/goreecloud-git/repos/my-private-repo.git` under the user running `gcgit`. Change it using `gcgit --root /path/to/private/storage ...` or `GC_GIT_ROOT`. Owner-only mode `0700` is required for the storage root and `repos/` directory. This tool will **not** silently chmod pre-existing directories.
+Storage defaults to `~/.local/share/goreecloud-git/repos/my-private-repo.git` under the user running `gcgit`. Change it using `gcgit --root /path/to/private/storage ...` or `GC_GIT_ROOT`. Owner-only mode `0700` is required for the storage root and `repos/` directory. This tool will **not** silently chmod pre-existing directories. New repository names are reserved with an exclusive, owner-private directory creation to prevent concurrent creators from overwriting a name. If Git initialization fails, the reserved directory is intentionally left private for manual investigation, not auto-deleted or reused.
 
 The repository is a standard bare Git repository. On the **same machine and account**, test a push and clone using Git:
 
