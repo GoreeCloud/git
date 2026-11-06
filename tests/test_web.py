@@ -154,6 +154,30 @@ class WebTests(unittest.TestCase):
         self.assertIn("No commits yet", body)
         self.assertNotIn(str(self.store.root), body)
 
+    def test_overview_survives_private_repository_permission_failure(self):
+        unsafe = self.store.create("unsafe")
+        unsafe.chmod(0o755)
+        status, body, headers = self.request("/", auth=self.token)
+        self.assertEqual(status, 200)
+        self.assertIn("example", body)
+        self.assertIn("unsafe", body)
+        self.assertIn("Repository unavailable", body)
+        self.assertIn("gcgit doctor", body)
+        self.assertNotIn(str(self.store.root), body)
+        self.assertIn("no-store", headers["Cache-Control"])
+        self.assertEqual(self.request("/repos/unsafe", auth=self.token)[0], 404)
+        self.assertEqual(self.request("/", auth=None)[0], 401)
+
+    def test_overview_survives_corrupt_git_refs(self):
+        corrupt = self.store.create("corrupt")
+        (corrupt / "refs/heads/main").write_text("not-a-valid-object-id")
+        status, body, _ = self.request("/", auth=self.token)
+        self.assertEqual(status, 200)
+        self.assertIn("<a href='/repos/example'>example</a>", body)
+        self.assertIn("corrupt", body)
+        self.assertIn("Repository unavailable", body)
+        self.assertNotIn(str(self.store.root), body)
+
     def test_path_traversal_and_write_rejected(self):
         self.assertEqual(self.request("/repos/%2E%2E%2Foutside", auth=self.token)[0], 404)
         self.assertEqual(self.request("/does-not-exist", auth=self.token)[0], 404)
