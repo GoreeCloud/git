@@ -14,6 +14,8 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="Initialize owner-private storage (0700)")
     create = sub.add_parser("create", help="Create a private bare Git repository")
     create.add_argument("name")
+    create.add_argument("--max-push-mib", type=int, default=1024,
+                        help="Maximum incoming Git pack size, 1-16384 MiB (default 1024)")
     sub.add_parser("list", help="List private repository names")
     info = sub.add_parser("info", help="Print repository details")
     info.add_argument("name")
@@ -47,7 +49,7 @@ def run(argv: list[str] | None = None) -> int:
         if args.command == "init":
             print(f"Private storage initialized: {store.init()}")
         elif args.command == "create":
-            print(f"Private repository created: {store.create(args.name)}")
+            print(f"Private repository created: {store.create(args.name, max_push_mib=args.max_push_mib)}")
         elif args.command == "list":
             for name in store.names():
                 print(name)
