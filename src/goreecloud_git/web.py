@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
@@ -92,14 +93,8 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
             path = parsed.path
             mode = self.appearance()
             if path == "/settings/appearance":
-                values = parse_qs(parsed.query, keep_blank_values=True)
-                selected = values.get("mode", [])
-                if set(values) != {"mode"} or len(selected) != 1 or selected[0] not in (*MODES, "reset"):
-                    self.respond(400, b"Invalid appearance", "text/plain; charset=utf-8")
-                    return
-                self.headers_for(303, "text/plain; charset=utf-8", 0)
-                self.send_header("Set-Cookie", appearance_cookie(selected[0]))
-                self.send_header("Location", "/settings")
+                self.headers_for(405, "text/plain; charset=utf-8", 0)
+                self.send_header("Allow", "POST")
                 self.end_headers()
                 return
             if path == "/settings":
@@ -109,14 +104,18 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
                     f"{' checked' if mode == value else ''}><span>{label}</span></label>"
                     for value, label in labels
                 )
+                csrf = hmac.new(token.encode("ascii"), b"gcgit:appearance:v1", hashlib.sha256).hexdigest()
                 body = (
                     "<section class='hero'><p class='eyebrow'>Personal settings</p>"
                     "<h1>Appearance</h1><p>Choose a comfortable reading experience. Light is the default.</p></section>"
-                    "<form method='get' action='/settings/appearance' class='card'>"
+                    "<form method='post' action='/settings/appearance' class='card'>"
+                    f"<input type='hidden' name='csrf' value='{csrf}'>"
                     "<fieldset><legend>Color appearance</legend>"
                     f"<div class='choices'>{choices}</div></fieldset>"
-                    "<div class='actions'><button type='submit'>Save appearance</button>"
-                    "<a href='/settings/appearance?mode=reset'>Reset to Light</a></div></form>"
+                    "<div class='actions'><button type='submit'>Save appearance</button></div></form>"
+                    "<form method='post' action='/settings/appearance' class='reset-action'>"
+                    f"<input type='hidden' name='csrf' value='{csrf}'>"
+                    "<button type='submit' name='mode' value='reset'>Reset to Light</button></form>"
                     "<p class='muted'>This browser stores only an appearance preference in a cookie, never Git data.</p>"
                 )
                 self.respond(200, page("Appearance", body, mode, "settings"))
@@ -172,16 +171,61 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
             if not self.authorized():
                 self.challenge()
                 return
+            path = urlsplit(self.path)
+            if path.path != "/settings/appearance" or path.query:
+                self.reject_write()
+                return
+            origin = self.headers.get("Origin")
+            if origin:
+                parsed_origin = urlsplit(origin)
+                if (parsed_origin.scheme not in ("http", "https")
+                        or parsed_origin.netloc != self.headers.get("Host")
+                        or parsed_origin.path or parsed_origin.query or parsed_origin.fragment):
+                    self.respond(403, b"Request rejected", "text/plain; charset=utf-8")
+                    return
+            content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+            except ValueError:
+                length = 0
+            if content_type != "application/x-www-form-urlencoded" or not 1 <= length <= 512:
+                self.respond(400, b"Invalid appearance", "text/plain; charset=utf-8")
+                return
+            try:
+                data = self.rfile.read(length).decode("utf-8")
+                values = parse_qs(data, keep_blank_values=True, strict_parsing=True)
+            except (UnicodeError, ValueError):
+                self.respond(400, b"Invalid appearance", "text/plain; charset=utf-8")
+                return
+            modes = values.get("mode", [])
+            csrf_values = values.get("csrf", [])
+            if (set(values) != {"mode", "csrf"} or len(modes) != 1
+                    or modes[0] not in (*MODES, "reset") or len(csrf_values) != 1):
+                self.respond(400, b"Invalid appearance", "text/plain; charset=utf-8")
+                return
+            expected = hmac.new(token.encode("ascii"), b"gcgit:appearance:v1", hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(csrf_values[0], expected):
+                self.respond(403, b"Request rejected", "text/plain; charset=utf-8")
+                return
+            self.headers_for(303, "text/plain; charset=utf-8", 0)
+            self.send_header("Set-Cookie", appearance_cookie(modes[0]))
+            self.send_header("Location", "/settings")
+            self.end_headers()
+
+        def reject_write(self) -> None:
+            if not self.authorized():
+                self.challenge()
+                return
             data = b"Method not allowed"
             self.headers_for(405, "text/plain; charset=utf-8", len(data))
             self.send_header("Allow", "GET")
             self.end_headers()
             self.wfile.write(data)
 
-        do_PUT = do_POST
-        do_DELETE = do_POST
-        do_PATCH = do_POST
-        do_OPTIONS = do_POST
+        do_PUT = reject_write
+        do_DELETE = reject_write
+        do_PATCH = reject_write
+        do_OPTIONS = reject_write
 
         def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
             # Parser/unsupported-method errors must not reveal request details
