@@ -6,7 +6,7 @@
 - **Private data boundary:** Bare Git repositories are stored outside the source checkout under a strict 0700 owner-controlled data root. Their `.git` object trees are never synchronized to GitHub by this application.
 - **CLI admin boundary:** `gcgit` executes directly as the repository filesystem owner. Creation/listing/configuration are local-only. There is no remote admin API.
 - **SSH Git boundary:** Git push and clone run through standard OpenSSH/Git. The operating system authenticates SSH keys; `git-shell` restricts the service account where deployed. The application itself does not authenticate Git transport clients or isolate multiple users.
-- **Web boundary:** Optional owner-only HTTP Basic login; token in a local 0600 file; requests limited to read-only repository metadata and commit history. Server refuses non-loopback binds, bounds in-flight request threads to eight, applies 10-second socket I/O timeouts, rejects overload with anonymous 503, and returns CSP, no-cache, no-sniff, no-frame, and no-referrer headers. These are single-process limits, not admission rate limiting or Git CPU quotas.
+- **Web boundary:** Optional owner-only HTTP Basic login; token in a local 0600 file; requests limited to read-only repository metadata and commit history and a non-secret appearance cookie. GC UI v1 semantic role CSS and a Light-first Appearance setting (Light/Dark/explicit Auto) do not introduce a Git mutation API. Server refuses non-loopback binds, bounds in-flight request threads to eight, applies 10-second socket I/O timeouts, rejects overload with anonymous 503, and returns CSP, no-cache, no-sniff, no-frame, and no-referrer headers. These are single-process limits, not admission rate limiting or Git CPU quotas.
 
 ## Threats and mitigations
 
@@ -32,10 +32,6 @@ Before hosting actual private assets: review SSH and filesystem account permissi
 ## Integrity verification
 
 `gcgit verify REPOSITORY` runs `git fsck --full --no-reflogs` against the owner-selected private bare repository. It does not repair objects, modify refs, or replace encrypted backups. A clean return is a useful local structural check, not a guarantee of disaster recovery; separately validate backups through an isolated restore drill.
-
-## Cross-product encrypted recovery plan
-
-GoreeCloud Backup already has a Kopia-based encrypted snapshot foundation, so GoreeCloud Git will not duplicate its encryption, scheduling or restore engine. See [backup and isolated recovery acceptance](backup-recovery.md) for a disposable-data runbook, quiesced Git write requirement, owner-private source and off-host destination boundaries, and verification of restored Git objects and refs. **No encrypted Git snapshot has been restored or deployed as part of this source development.**
 
 ## Cross-product encrypted recovery plan
 

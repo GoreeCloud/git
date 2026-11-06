@@ -7,38 +7,35 @@ from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import threading
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from .core import GitError, Store, check_name
-
-CSS = """
-:root{color-scheme:light dark;--app-canvas:#f6f7fb;--app-surface:#fff;--app-text:#192236;--app-muted:#516079;--app-border:#dae0eb;--app-accent:#5b47b0}
-@media(prefers-color-scheme:dark){:root{--app-canvas:#101421;--app-surface:#1a2131;--app-text:#f2f4fc;--app-muted:#b7c2d7;--app-border:#364055;--app-accent:#b0a0ff}}
-*{box-sizing:border-box}body{background:var(--app-canvas);color:var(--app-text);font:16px/1.6 system-ui,-apple-system,sans-serif;margin:0}
-main{max-width:920px;margin:auto;padding:24px 20px 64px}header{border-bottom:1px solid var(--app-border);background:var(--app-surface)}
-header>div{max-width:920px;margin:auto;padding:16px 20px;display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-a{color:var(--app-accent);text-underline-offset:3px}a:focus-visible{outline:3px solid var(--app-accent);outline-offset:4px;border-radius:3px}
-.brand{font-weight:800;letter-spacing:.01em;color:var(--app-text);text-decoration:none}.muted{color:var(--app-muted)}
-h1{font-size:clamp(1.65rem,4vw,2.45rem);line-height:1.2;margin:30px 0 10px}h2{font-size:1.12rem}
-.card{background:var(--app-surface);border:1px solid var(--app-border);border-radius:14px;padding:18px 20px;margin:14px 0}
-.card h2{margin:0}.split{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
-.pill{border:1px solid var(--app-border);color:var(--app-muted);border-radius:100px;padding:2px 12px;font-size:.82rem}
-code{font: .92em ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
-.timeline{list-style:none;padding:0}.timeline li{border-bottom:1px solid var(--app-border);padding:12px 0}.timeline li:last-child{border:0}
-footer{margin-top:28px;color:var(--app-muted);font-size:.9rem}
-@media(max-width:480px){main{padding:12px 16px 42px}.card{padding:14px}}
-""".strip()
+from .theme import CSS, MODES, appearance_cookie, appearance_from_cookie
 
 
-def page(title: str, body: str) -> bytes:
-    return ("<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-            f"<title>{escape(title)} · GoreeCloud Git</title>"
-            "<link rel='stylesheet' href='/assets/site.css'></head><body>"
-            "<header><div><a class='brand' href='/'>GoreeCloud Git</a>"
-            "<span class='pill'>Private · Read-only web</span></div></header>"
-            f"<main>{body}<footer>CLI and native Git over SSH remain the authoritative write interface.</footer></main>"
-            "</body></html>").encode("utf-8")
+
+
+def page(title: str, body: str, mode: str = "light", section: str = "repos") -> bytes:
+    """Accessible GC UI shell without scripts or externally hosted assets."""
+    if mode not in MODES:
+        mode = "light"
+    repo_current = " aria-current='page'" if section == "repos" else ""
+    settings_current = " aria-current='page'" if section == "settings" else ""
+    return (
+        f"<!doctype html><html lang='en' data-gc-mode='{mode}'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'>"
+        f"<title>{escape(title)} · GoreeCloud Git</title>"
+        "<link rel='stylesheet' href='/assets/site.css'></head><body>"
+        "<a class='skip-link' href='#main-content'>Skip to content</a>"
+        "<header><div class='header-inner'><a class='brand' href='/'>GoreeCloud Git</a>"
+        "<nav aria-label='Primary navigation'>"
+        f"<a href='/'{repo_current}>Repositories</a>"
+        f"<a href='/settings'{settings_current}>Appearance</a>"
+        "</nav></div></header>"
+        f"<main id='main-content'>{body}"
+        "<footer class='muted'>Private owner view. Git administration and SSH transport remain separate.</footer>"
+        "</main></body></html>"
+    ).encode("utf-8")
 
 
 def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
@@ -58,7 +55,7 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 
         def respond(self, status: int, data: bytes, content_type: str = "text/html; charset=utf-8") -> None:
             self.headers_for(status, content_type, len(data))
@@ -84,11 +81,46 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
             if send_body:
                 self.wfile.write(data)
 
+        def appearance(self) -> str:
+            return appearance_from_cookie(self.headers.get("Cookie", ""))
+
         def do_GET(self) -> None:
             if not self.authorized():
                 self.challenge()
                 return
-            path = urlsplit(self.path).path
+            parsed = urlsplit(self.path)
+            path = parsed.path
+            mode = self.appearance()
+            if path == "/settings/appearance":
+                values = parse_qs(parsed.query, keep_blank_values=True)
+                selected = values.get("mode", [])
+                if set(values) != {"mode"} or len(selected) != 1 or selected[0] not in (*MODES, "reset"):
+                    self.respond(400, b"Invalid appearance", "text/plain; charset=utf-8")
+                    return
+                self.headers_for(303, "text/plain; charset=utf-8", 0)
+                self.send_header("Set-Cookie", appearance_cookie(selected[0]))
+                self.send_header("Location", "/settings")
+                self.end_headers()
+                return
+            if path == "/settings":
+                labels = (("light", "Light"), ("dark", "Dark"), ("auto", "Follow system"))
+                choices = "".join(
+                    f"<label class='choice'><input type='radio' name='mode' value='{value}'"
+                    f"{' checked' if mode == value else ''}><span>{label}</span></label>"
+                    for value, label in labels
+                )
+                body = (
+                    "<section class='hero'><p class='eyebrow'>Personal settings</p>"
+                    "<h1>Appearance</h1><p>Choose a comfortable reading experience. Light is the default.</p></section>"
+                    "<form method='get' action='/settings/appearance' class='card'>"
+                    "<fieldset><legend>Color appearance</legend>"
+                    f"<div class='choices'>{choices}</div></fieldset>"
+                    "<div class='actions'><button type='submit'>Save appearance</button>"
+                    "<a href='/settings/appearance?mode=reset'>Reset to Light</a></div></form>"
+                    "<p class='muted'>This browser stores only an appearance preference in a cookie, never Git data.</p>"
+                )
+                self.respond(200, page("Appearance", body, mode, "settings"))
+                return
             if path == "/assets/site.css":
                 self.respond(200, CSS.encode(), "text/css; charset=utf-8")
                 return
@@ -101,10 +133,12 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
                         cards.append(f"<article class='card'><div class='split'><h2><a href='/repos/{href}'>{escape(name)}</a></h2>"
                                      f"<span class='pill'>{info['commits']} commits</span></div>"
                                      f"<span class='muted'>{len(info['branches'])} branches</span></article>")
-                    body = ("<h1>Private repositories</h1><p class='muted'>Owner-only repository overview."
-                            " Nothing here is published to GitHub.</p>" + ("".join(cards) if cards else
+                    body = ("<section class='hero'><p class='eyebrow'>Your private Git workspace</p>"
+                            "<h1>Private repositories</h1><p>Owner-operated source history."
+                            " Only your chosen host stores repository contents.</p></section>"
+                            + ("".join(cards) if cards else
                             "<div class='card'><p>No repositories yet. Create one using <code>gcgit create name</code>.</p></div>"))
-                    self.respond(200, page("Repositories", body))
+                    self.respond(200, page("Repositories", body, mode, "repos"))
                     return
                 if path.startswith("/repos/"):
                     name = check_name(unquote(path[len("/repos/"):]))
@@ -118,13 +152,13 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
                             f"<div class='card'><p><strong>Commits:</strong> {info['commits']}</p>"
                             f"<p><strong>Branches:</strong> {branches}</p></div>"
                             f"<h2>Recent history</h2><ol class='card timeline'>{history or '<li>No commits yet.</li>'}</ol>")
-                    self.respond(200, page(name, body))
+                    self.respond(200, page(name, body, mode, "repos"))
                     return
             except (ValueError, GitError, OSError):
                 # Avoid leaking private server filesystem paths through error messages.
-                self.respond(404, page("Unavailable", "<h1>Repository unavailable</h1>"))
+                self.respond(404, page("Unavailable", "<h1>Repository unavailable</h1>", mode))
                 return
-            self.respond(404, page("Not found", "<h1>Not found</h1>"))
+            self.respond(404, page("Not found", "<h1>Not found</h1>", mode))
 
         def do_HEAD(self) -> None:
             if not self.authorized():
