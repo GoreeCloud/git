@@ -5,10 +5,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from goreecloud_git.cli import run
 from goreecloud_git.core import GitError, Store
-from goreecloud_git.ssh import parse_request
+from goreecloud_git.ssh import parse_request, serve_ssh
 
 
 class SSHTransportTests(unittest.TestCase):

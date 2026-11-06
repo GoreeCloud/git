@@ -24,8 +24,11 @@ class BoundedGitTests(unittest.TestCase):
         self.fake.chmod(0o700)
 
     def invoke(self, **budgets):
-        with patch.dict(os.environ, {"PATH": self.path}, clear=False):
-            return git("fake", **budgets)
+        # Fake Git is injected by a test-only mock. The production lookup must
+        # never use an arbitrary PATH inherited from the invoking SSH client.
+        with patch("goreecloud_git.core.git_binary", return_value=str(self.fake)):
+            with patch.dict(os.environ, {"PATH": self.path}, clear=False):
+                return git("fake", **budgets)
 
     def test_output_ceiling_kills_untrusted_producer(self):
         self.fake_git("import os,time\nos.write(1,b'x'*65536)\ntime.sleep(30)\n")
@@ -53,10 +56,23 @@ class BoundedGitTests(unittest.TestCase):
             "import os\n"
             "print(os.environ.get('GIT_CONFIG_NOSYSTEM'))\n"
             "print(os.environ.get('GIT_TRACE', 'absent'))\n"
+            "print(os.environ.get('LD_PRELOAD', 'absent'))\n"
+            "print(os.environ.get('PYTHONPATH', 'absent'))\n"
+            "print(os.environ.get('BASH_ENV', 'absent'))\n"
+            "print(os.environ.get('PATH'))\n"
         )
-        with patch.dict(os.environ, {"PATH": self.path, "GIT_TRACE": "danger"}, clear=False):
-            output = git("fake")
-        self.assertEqual(output, "1\nabsent")
+        with patch.dict(os.environ, {
+            "GIT_TRACE": "danger", "GIT_CONFIG_COUNT": "1",
+            "LD_PRELOAD": "/tmp/untrusted.so", "PYTHONPATH": "/tmp/inject",
+            "BASH_ENV": "/tmp/inject", "PATH": self.path,
+        }, clear=False):
+            output = self.invoke()
+        self.assertEqual(output, "1\nabsent\nabsent\nabsent\nabsent\n" + os.defpath)
+
+    def test_untrusted_path_cannot_replace_git_binary(self):
+        self.fake_git("print('UNTRUSTED EXECUTABLE')\n")
+        with patch.dict(os.environ, {"PATH": self.path}, clear=False):
+            self.assertTrue(git("--version").startswith("git version"))
 
     def test_real_git_version_succeeds(self):
         self.assertTrue(git("--version").startswith("git version"))
