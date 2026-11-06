@@ -117,7 +117,7 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 python -m compileall -q src tests
 ```
 
-Tests use real Git in throwaway temporary folders, do not access private account data, and do not require network access. GitHub Actions runs the same suite on supported Python versions.
+Tests use real Git in throwaway temporary folders, do not access private account data, and do not require network access. Administrative Git metadata commands have a **1 MiB captured-output ceiling** and an elapsed-time deadline (usually 12 seconds; 60 seconds for `gcgit verify`); the affected subprocess group is terminated on timeout or oversized output. The native SSH Git wire protocol streams separately and is not buffered into this limit. GitHub Actions runs the same suite on supported Python versions.
 
 ## Security and boundaries
 

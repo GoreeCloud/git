@@ -18,7 +18,7 @@
 | Force-push or branch deletion | `receive.denyNonFastForwards` and `receive.denyDeletes` set on creation | Admin can alter Git config; branch ACL not implemented |
 | Browser XSS | HTML escaping, no user-supplied JS, restrictive CSP | Full browser/security review outstanding |
 | Credential capture | Basic auth only over localhost/SSH tunnel or separately configured TLS | Browser credential caching; no account lockout or server-side session expiry |
-| Git command injection | argv subprocess invocation; stripped Git environment; strict repository names | Per-repo Git configuration and untrusted Git object parsing require continued review |
+| Git command injection / oversized metadata | argv subprocess invocation, stripped Git environment, strict repository names, 1 MiB bounded metadata stdout, timeouts and Git process-group cleanup on failure | Per-repo Git config, untrusted object parsing, filesystem quotas, and aggregate compute budgets require review |
 | Data loss | Standard Git bare repository format, recoverable via filesystem backups | No built-in backup, quota, scrub or restore automation |
 
 ## Non-goals for first milestone
