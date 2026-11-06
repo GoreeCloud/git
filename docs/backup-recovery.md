@@ -32,10 +32,26 @@ References:
 7. Confirm a **wrong key / missing encrypted repository credentials** cannot recover plaintext, and that restoration refuses a pre-existing destination. Check cleanup of any temporary credentials, caches, and restored fixture after preserving only nonsecret evidence. Do not run destructive corruption drills against any existing backup.
 8. Record pass/fail, engine versions, authorized test host, snapshot IDs (where not sensitive), SHA comparisons, duration, and unresolved gaps in approved GoreeCloud project records. Only a fully reviewed real-environment drill can qualify actual deployment/recovery acceptance.
 
+## Optional local encrypted Kopia/Git recovery drill
+
+`scripts/smoke-kopia-git-recovery.py` is an **opt-in, disposable, local-only** acceptance test. It does **not** automatically install Kopia, schedule a backup, access a real private repository, select an external storage provider, or modify GoreeCloud Backup's actual repository or credentials. **The script does not itself enforce network isolation**; run it in an offline sandbox to ensure an installed Kopia binary cannot contact the network, including update checks.
+
+With an independently reviewed, externally installed Kopia executable and an authorized **network-isolated development sandbox**, run:
+
+```bash
+KOPIA_BIN=/path/to/reviewed/kopia python3 scripts/smoke-kopia-git-recovery.py
+```
+
+The script creates a private bare Git fixture, pushes an original test commit, records its ref and receive-protection settings, and generates a disposable web token. It creates a **new encrypted Kopia filesystem repository separate from that source root** with a random password held only in a child-process environment, then snapshots the quiesced source. It connects separately with a **fresh verification cache** and runs structural and **100% file verification**, rejects incorrect credentials and an already existing restore destination, and restores the snapshot root object to another new private directory. It checks the restored Git ref, object integrity, receive settings, native clone contents, and restored token rotation. A supplemental plaintext-marker check is a smoke test, **not** cryptographic proof.
+
+**Verified isolated development evidence (November 6, 2026):** An independently retrieved official Kopia **v0.23.1** Linux x64 release asset had SHA-256 `416d0f84a3dbb321a8b2d8f0997b1a0a6e915babe79ee76fa6e4d2bd1e1c5178`, matching the digest exposed by its official GitHub release metadata. The pinned external CLI was executed read-only inside an **offline Bubblewrap sandbox** with private temporary storage; the complete synthetic encrypted Git snapshot, fresh-cache verification, wrong-password and existing-destination negatives, restore, token rotation, refs and Git clone drill **passed**. No Kopia release files or backup credentials were committed to this repository.
+
+**Still not verified:** Actual **off-host** encrypted replication, approved durable Kopia key recovery, live GoreeCloud Backup alpha API orchestration, real private Git repository restore, realistic performance/RPO/RTO, retained lifecycle data, production backup scheduling, and owner acceptance. The separate [GoreeCloud Backup](https://github.com/GoreeCloud/backup) engine remains the authority for future integrated encrypted backup/restore operations.
+
 ## Operational boundaries
 
 GoreeCloud Git's optional local web runs on TCP `127.0.0.1:8787` by default. GoreeCloud Backup's alpha dashboard also defaults to loopback port 8787; **do not launch both on the same port**. When intentionally co-locating reviewed development instances, choose a distinct loopback port (for example `gcgit serve-web --port 8788`) and keep both behind appropriate authenticated private access.
 
 GoreeCloud Backup's API uses short, bounded jobs and may time out on large encrypted repositories. Interrupted/failed snapshots or restores can leave partial output. Do not automatically retry uncertain operations, declare a restore successful from a green integrity check, or treat passing CI as actual encrypted disaster-recovery acceptance.
 
-**Current evidence boundary:** GoreeCloud Git's unit suite includes a **disposable filesystem snapshot-to-new-root simulation**, which exercises Git integrity, refs, server configuration and native clone. It is not an encrypted Kopia/Backup API integration test, off-host replication test, key escrow audit or production restore drill. Those remain open in [Git readiness issue #1](https://github.com/GoreeCloud/git/issues/1).
+**Current evidence boundary:** GoreeCloud Git's unit suite includes a disposable filesystem snapshot-to-new-root simulation. The separate **opt-in synthetic Kopia CLI drill** has now been exercised successfully with an encrypted local repository, fresh-cache verification and an isolated Git restore. Neither test proves off-host replication, GoreeCloud Backup alpha API integration, recovery of actual private Git data, secure credential escrow, a scheduled backup service or production disaster-recovery readiness. Those gates remain open in [Git readiness issue #1](https://github.com/GoreeCloud/git/issues/1).
