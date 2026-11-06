@@ -6,6 +6,7 @@ import binascii
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
+import threading
 from urllib.parse import quote, unquote, urlsplit
 
 from .core import GitError, Store, check_name
@@ -75,13 +76,17 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
                 return False
             return hmac.compare_digest(username, "owner") and hmac.compare_digest(supplied, token)
 
+        def challenge(self, send_body: bool = True) -> None:
+            data = b"Authentication required"
+            self.headers_for(401, "text/plain; charset=utf-8", len(data) if send_body else 0)
+            self.send_header("WWW-Authenticate", 'Basic realm="GoreeCloud Git", charset="UTF-8"')
+            self.end_headers()
+            if send_body:
+                self.wfile.write(data)
+
         def do_GET(self) -> None:
             if not self.authorized():
-                data = b"Authentication required"
-                self.headers_for(401, "text/plain; charset=utf-8", len(data))
-                self.send_header("WWW-Authenticate", 'Basic realm="GoreeCloud Git", charset="UTF-8"')
-                self.end_headers()
-                self.wfile.write(data)
+                self.challenge()
                 return
             path = urlsplit(self.path).path
             if path == "/assets/site.css":
@@ -122,12 +127,81 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
             self.respond(404, page("Not found", "<h1>Not found</h1>"))
 
         def do_HEAD(self) -> None:
-            self.send_error(405)
+            if not self.authorized():
+                self.challenge(send_body=False)
+                return
+            self.headers_for(405, "text/plain; charset=utf-8", 0)
+            self.send_header("Allow", "GET")
+            self.end_headers()
 
         def do_POST(self) -> None:
-            self.send_error(405)
+            if not self.authorized():
+                self.challenge()
+                return
+            data = b"Method not allowed"
+            self.headers_for(405, "text/plain; charset=utf-8", len(data))
+            self.send_header("Allow", "GET")
+            self.end_headers()
+            self.wfile.write(data)
+
+        do_PUT = do_POST
+        do_DELETE = do_POST
+        do_PATCH = do_POST
+        do_OPTIONS = do_POST
+
+        def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+            # Parser/unsupported-method errors must not reveal request details
+            # or silently omit response security and no-store headers.
+            self.respond(code, b"Request rejected", "text/plain; charset=utf-8")
 
     return Handler
+
+
+class LimitedWebServer(ThreadingHTTPServer):
+    """Bound concurrent local HTTP connections instead of spawning unlimited threads."""
+
+    def __init__(self, address, handler, *, max_connections: int = 8):
+        if not 1 <= max_connections <= 128:
+            raise ValueError("Invalid web connection limit.")
+        self._slots = threading.BoundedSemaphore(max_connections)
+        super().__init__(address, handler)
+
+    def get_request(self):
+        sock, address = super().get_request()
+        sock.settimeout(10)  # slow/incomplete HTTP requests must not hold a worker forever
+        return sock, address
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            # Overload is deliberately anonymous: no repository path or token details.
+            data = (
+                b"HTTP/1.1 503 Service Unavailable\r\n"
+                b"Content-Type: text/plain; charset=utf-8\r\n"
+                b"Content-Length: 0\r\n"
+                b"Cache-Control: no-store\r\n"
+                b"X-Content-Type-Options: nosniff\r\n"
+                b"X-Frame-Options: DENY\r\n"
+                b"Referrer-Policy: no-referrer\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            try:
+                request.sendall(data)
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 def serve(store: Store, host: str = "127.0.0.1", port: int = 8787) -> None:
@@ -136,6 +210,6 @@ def serve(store: Store, host: str = "127.0.0.1", port: int = 8787) -> None:
     if not ipaddress.ip_address(host).is_loopback:
         raise ValueError("Web must bind to loopback only.")
     token = store.read_token()
-    with ThreadingHTTPServer((host, port), make_handler(store, token)) as server:
+    with LimitedWebServer((host, port), make_handler(store, token)) as server:
         print(f"Owner-only web view on http://{host}:{port} (HTTPS/SSH tunnel required remotely)")
         server.serve_forever()

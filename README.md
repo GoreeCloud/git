@@ -89,7 +89,7 @@ gcgit serve-web             # listens only on 127.0.0.1:8787
 # Username: owner   Password: the generated web token
 ```
 
-The browser lists repositories, branch counts, commit totals, and recent history; it has no upload, push, create, delete, or admin API. It uses HTTP Basic authentication and no JavaScript. **Never expose its HTTP port directly on a public interface.** For remote private access, use an SSH tunnel or a properly protected TLS reverse proxy. Example from a trusted client using an authorized SSH administration account:
+The browser lists repositories, branch counts, commit totals, and recent history; it has no upload, push, create, delete, or admin API. The development server now allows at most **8 concurrent HTTP request workers**, rejects additional connections with anonymous HTTP 503 responses, and applies a **10-second per-socket timeout** to reduce slow/incomplete-request resource exhaustion. It is not a complete HTTP rate limiter or CPU/disk quota. It uses HTTP Basic authentication and no JavaScript. **Never expose its HTTP port directly on a public interface.** For remote private access, use an SSH tunnel or a properly protected TLS reverse proxy. Example from a trusted client using an authorized SSH administration account:
 
 ```bash
 ssh -N -L 8787:127.0.0.1:8787 admin@git.example.net
