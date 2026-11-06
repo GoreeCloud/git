@@ -127,7 +127,20 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
                 if path == "/":
                     cards = []
                     for name in store.names():
-                        info = store.info(name)
+                        try:
+                            info = store.info(name)
+                        except (ValueError, GitError, OSError):
+                            # One corrupted, unfinished or overexposed repository
+                            # must not hide every healthy private repository.
+                            # Only the owner sees this; never echo Git errors
+                            # containing internal paths or object contents.
+                            cards.append(
+                                f"<article class='card'><h2>{escape(name)}</h2>"
+                                "<p class='muted'>Repository unavailable. "
+                                "Run <code>gcgit doctor</code> and "
+                                "<code>gcgit verify</code> for inspection.</p></article>"
+                            )
+                            continue
                         href = quote(name)
                         cards.append(f"<article class='card'><div class='split'><h2><a href='/repos/{href}'>{escape(name)}</a></h2>"
                                      f"<span class='pill'>{info['commits']} commits</span></div>"
