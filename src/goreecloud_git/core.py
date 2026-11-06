@@ -170,6 +170,30 @@ class Store:
             result.append(name)
         return sorted(result, key=str.casefold)
 
+    def inventory_issues(self) -> list[str]:
+        """Read-only preflight for unsafe or unfinished managed repo entries.
+
+        Unlike names(), inspect incomplete reservations and symlinks too. This
+        is a basic control/permission check, not a replacement for Git fsck.
+        """
+        self.ready()
+        issues: list[str] = []
+        for candidate in self.repos.iterdir():
+            if not candidate.name.endswith(".git"):
+                continue
+            name = candidate.name[:-4]
+            try:
+                check_name(name)
+            except ValueError:
+                # Never print a path containing unknown/control characters.
+                issues.append("(invalid repository filename)")
+                continue
+            try:
+                self.existing(name)
+            except (GitError, OSError, ValueError):
+                issues.append(name)
+        return sorted(set(issues), key=str.casefold)
+
     def info(self, name: str) -> dict[str, object]:
         path = self.existing(name)
         refs = git("--git-dir", str(path), "for-each-ref", "--format=%(refname:short)", "refs/heads")

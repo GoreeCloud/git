@@ -160,6 +160,44 @@ class StoreTests(unittest.TestCase):
         os.chmod(self.store.token_path(), 0o644)
         self.assertEqual(run(["--root", str(self.store.root), "doctor"]), 1)
 
+    def test_doctor_reports_incomplete_reservation_without_repair(self):
+        self.store.create("healthy")
+        orphan = self.store.repos / "unfinished.git"
+        orphan.mkdir(mode=0o700)
+        self.assertNotIn("unfinished", self.store.names())
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            status = run(["--root", str(self.store.root), "doctor"])
+        self.assertEqual(status, 1)
+        self.assertIn("unfinished", err.getvalue())
+        self.assertNotIn("healthy", err.getvalue())
+        self.assertTrue(orphan.is_dir())
+        self.assertEqual(stat.S_IMODE(orphan.stat().st_mode), 0o700)
+
+    def test_doctor_reports_unsafe_directory_and_symlink(self):
+        exposed = self.store.create("exposed")
+        os.chmod(exposed, 0o755)
+        link = self.store.repos / "link.git"
+        link.symlink_to(exposed, target_is_directory=True)
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            status = run(["--root", str(self.store.root), "doctor"])
+        self.assertEqual(status, 1)
+        self.assertIn("exposed", err.getvalue())
+        self.assertIn("link", err.getvalue())
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(stat.S_IMODE(exposed.stat().st_mode), 0o755)
+
+    def test_doctor_healthy_inventory_does_not_run_fsck(self):
+        self.store.create("ready")
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            status = run(["--root", str(self.store.root), "doctor"])
+        self.assertEqual(status, 0)
+        self.assertIn("basic access checks passed", out.getvalue())
+        self.assertNotIn("fsck", err.getvalue())
+        self.assertEqual(err.getvalue(), "")
+
     def test_cli_verify(self):
         self.store.create("project")
         self.assertEqual(run(["--root", str(self.store.root), "verify", "project"]), 0)
