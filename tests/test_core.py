@@ -88,6 +88,31 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(GitError):
             self.store.existing("shadow")
 
+    def test_exposed_repository_directory_is_rejected_without_repair(self):
+        path = self.store.create("example")
+        os.chmod(path, 0o755)
+        with self.assertRaises(GitError):
+            self.store.existing("example")
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o755)
+        self.store.create("healthy")
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = run(["--root", str(self.store.root), "verify-all"])
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL: example", err.getvalue())
+        self.assertIn("PASS: healthy", out.getvalue())
+        self.assertIn("Integrity sweep: 1/2 passed.", out.getvalue())
+
+    def test_control_file_link_is_rejected(self):
+        bare = self.store.create("linked")
+        source = bare / "config"
+        original = bare / "config.saved"
+        source.rename(original)
+        source.symlink_to(original)
+        with self.assertRaises(GitError):
+            self.store.existing("linked")
+        self.assertTrue(source.is_symlink())
+
     def test_must_not_repair_insecure_existing_root(self):
         os.chmod(self.store.root, 0o755)
         with self.assertRaises(GitError):
