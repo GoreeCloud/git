@@ -4,9 +4,12 @@ import os
 from pathlib import Path
 import re
 import secrets
+import selectors
+import signal
 import stat
 import subprocess
 import tempfile
+import time
 from urllib.parse import quote
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}\Z", re.ASCII)
@@ -22,22 +25,68 @@ def check_name(name: str) -> str:
         raise ValueError("Invalid name: use 1-63 letters, numbers, dots, dashes or underscores; no .git suffix.")
     return name
 
-def git(*args: str, timeout: int = 12) -> str:
-    """Invoke Git without shell interpolation or inherited Git environment overrides."""
+def git(*args: str, timeout: int = 12, max_output: int = 1048576) -> str:
+    """Run a bounded Git metadata/admin command without shell or environment overrides.
+
+    Git's SSH transport has a separate streaming entrypoint. This helper is
+    for short owner-initiated metadata/configuration commands, never for
+    receiving or sending Git pack streams.
+    """
+    if timeout <= 0 or not 1 <= max_output <= 1048576:
+        raise ValueError("Invalid Git command budget.")
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                 "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0",
                 "GIT_NO_REPLACE_OBJECTS": "1", "GIT_PAGER": "cat"})
     try:
-        result = subprocess.run(["git", *args], capture_output=True, text=True,
-                                timeout=timeout, check=False, env=env)
+        proc = subprocess.Popen(
+            ["git", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, env=env, start_new_session=True,
+        )
     except FileNotFoundError as exc:
         raise GitError("Git is not installed.") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise GitError("Git command timed out.") from exc
-    if result.returncode:
-        raise GitError(f"Git operation failed (exit {result.returncode}).")
-    return result.stdout.strip()
+    except OSError as exc:
+        raise GitError("Cannot start Git command.") from exc
+
+    deadline = time.monotonic() + timeout
+    chunks: list[bytes] = []
+    size = 0
+    completed = False
+    try:
+        assert proc.stdout is not None
+        with selectors.DefaultSelector() as selector:
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    raise GitError("Git command timed out.")
+                chunk = os.read(proc.stdout.fileno(), min(65536, max_output + 1 - size))
+                if not chunk:
+                    selector.unregister(proc.stdout)
+                    break
+                size += len(chunk)
+                if size > max_output:
+                    raise GitError("Git output exceeded the permitted size.")
+                chunks.append(chunk)
+        try:
+            status = proc.wait(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired as exc:
+            raise GitError("Git command timed out.") from exc
+        if status:
+            raise GitError(f"Git operation failed (exit {status}).")
+        completed = True
+        return b"".join(chunks).decode("utf-8", errors="replace").strip()
+    finally:
+        if not completed:
+            # An exited Git parent may have left a child holding stdout open.
+            # Kill the whole session group on failure or output exhaustion.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if proc.stdout is not None:
+            proc.stdout.close()
+        proc.wait()
 
 def private_directory(path: Path) -> None:
     if path.is_symlink() or not path.is_dir():
