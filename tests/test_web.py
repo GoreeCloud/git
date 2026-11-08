@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from goreecloud_git.core import Store
 from goreecloud_git.web import LimitedWebServer, make_handler
@@ -64,6 +65,9 @@ class WebTests(unittest.TestCase):
         self.assertIn("<nav aria-label='Primary navigation'>", body)
         self.assertNotIn("<script", body)
         self.assertIn("form-action 'self'", headers["Content-Security-Policy"])
+        # Same-origin allows real browser form Origin headers, yet suppresses
+        # outgoing cross-site Referer details (private repo names/paths).
+        self.assertEqual(headers["Referrer-Policy"], "same-origin")
         status, css, _ = self.request("/assets/site.css", auth=self.token)
         self.assertEqual(status, 200)
         self.assertIn("--gc-v1-color-canvas:#ECF0F8", css)
@@ -137,6 +141,7 @@ class WebTests(unittest.TestCase):
                 self.assertIn("no-store", headers["Cache-Control"])
         self.assertEqual(self.post_appearance("dark", csrf="0" * 64)[0], 403)
         self.assertEqual(self.post_appearance("dark", origin="https://evil.example")[0], 403)
+        self.assertEqual(self.post_appearance("dark", origin="null")[0], 403)
         allowed_origin = f"http://127.0.0.1:{self.server.server_port}"
         self.assertEqual(self.post_appearance("dark", origin=allowed_origin)[0], 303)
         status, body, _ = self.request("/", auth=self.token, cookie="gcgit_appearance=malicious")
@@ -153,6 +158,16 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("No commits yet", body)
         self.assertNotIn(str(self.store.root), body)
+
+    def test_overview_uses_singular_labels_for_one_commit_and_branch(self):
+        with patch.object(self.store, "info",
+                          return_value={"name": "example", "commits": 1, "branches": ["main"]}):
+            status, body, _ = self.request("/", auth=self.token)
+        self.assertEqual(status, 200)
+        self.assertIn("1 commit", body)
+        self.assertIn("1 branch", body)
+        self.assertNotIn("1 commits", body)
+        self.assertNotIn("1 branches", body)
 
     def test_overview_survives_private_repository_permission_failure(self):
         unsafe = self.store.create("unsafe")

@@ -55,7 +55,11 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
-            self.send_header("Referrer-Policy", "no-referrer")
+            # Same-origin referrers remain private to this authenticated service;
+            # cross-origin referrers stay suppressed. Chromium otherwise emits
+            # Origin: null on the appearance POST under no-referrer, causing
+            # the strict same-origin CSRF check to reject legitimate submits.
+            self.send_header("Referrer-Policy", "same-origin")
             self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 
         def respond(self, status: int, data: bytes, content_type: str = "text/html; charset=utf-8") -> None:
@@ -143,8 +147,8 @@ def make_handler(store: Store, token: str) -> type[BaseHTTPRequestHandler]:
                             continue
                         href = quote(name)
                         cards.append(f"<article class='card'><div class='split'><h2><a href='/repos/{href}'>{escape(name)}</a></h2>"
-                                     f"<span class='pill'>{info['commits']} commits</span></div>"
-                                     f"<span class='muted'>{len(info['branches'])} branches</span></article>")
+                                     f"<span class='pill'>{info['commits']} {'commit' if info['commits'] == 1 else 'commits'}</span></div>"
+                                     f"<span class='muted'>{len(info['branches'])} {'branch' if len(info['branches']) == 1 else 'branches'}</span></article>")
                     body = ("<section class='hero'><p class='eyebrow'>Your private Git workspace</p>"
                             "<h1>Private repositories</h1><p>Owner-operated source history."
                             " Only your chosen host stores repository contents.</p></section>"
