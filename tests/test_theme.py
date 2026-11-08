@@ -27,6 +27,10 @@ class AppearanceTests(unittest.TestCase):
         self.assertIn('@media (forced-colors:active)', CSS)
         self.assertIn("prefers-reduced-motion:reduce", CSS)
         self.assertIn("--gc-v1-foundation-radius-lg:26px", CSS)
+        # Base text follows the browser/root text-size preference rather
+        # than pinning user content to the default 16px.
+        self.assertIn("font:1rem/1.55 var(--gc-v1-foundation-typography-family-ui)", CSS)
+        self.assertNotIn("font:16px/1.55", CSS)
 
     def test_reference_text_pairs_meet_wcag_normal_text_contrast(self):
         """A narrow static check; not a browser/rendered-background WCAG audit."""

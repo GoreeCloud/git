@@ -92,7 +92,7 @@ CSS = """
 *,*::before,*::after {box-sizing:border-box}
 html {scroll-behavior:smooth}
 body {margin:0;min-width:0;background:var(--gc-v1-color-canvas);color:var(--gc-v1-color-on-canvas);
-  font:16px/1.55 var(--gc-v1-foundation-typography-family-ui)}
+  font:1rem/1.55 var(--gc-v1-foundation-typography-family-ui)}
 a {color:var(--gc-v1-color-link);text-underline-offset:3px}
 a:hover {text-decoration-thickness:2px}
 a:focus-visible,button:focus-visible,input:focus-visible {
