@@ -262,15 +262,37 @@ class Store:
         return token
 
     def read_token(self) -> str:
+        """Read a bounded owner-only token from the file descriptor we verified.
+
+        Never lstat() a pathname and then read_text() it: a concurrent
+        replacement could turn a safe regular token into a symlink or FIFO.
+        O_NOFOLLOW prevents symlink traversal, and O_NONBLOCK avoids hanging
+        on an injected FIFO before fstat has rejected nonregular files.
+        """
         dest = self.token_path()
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
         try:
-            entry = dest.lstat()
+            fd = os.open(dest, flags)
         except OSError as exc:
             raise GitError("Missing or exposed web token. Run 'gcgit web-token'.") from exc
-        if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid()
-                or stat.S_IMODE(entry.st_mode) & 0o077):
-            raise GitError("Missing or exposed web token. Run 'gcgit web-token'.")
-        token = dest.read_text(encoding="ascii").strip()
+        try:
+            entry = os.fstat(fd)
+            if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid()
+                    or stat.S_IMODE(entry.st_mode) & 0o077):
+                raise GitError("Missing or exposed web token. Run 'gcgit web-token'.")
+            # A generated token is only ~49 bytes. Bound file reads rather
+            # than letting a malformed file exhaust the owner web server.
+            data = os.read(fd, 4097)
+            if len(data) > 4096 or entry.st_size > 4096:
+                raise GitError("Invalid web token.")
+        except OSError as exc:
+            raise GitError("Cannot read web token.") from exc
+        finally:
+            os.close(fd)
+        try:
+            token = data.decode("ascii").strip()
+        except UnicodeDecodeError as exc:
+            raise GitError("Invalid web token.") from exc
         if len(token) < 40:
             raise GitError("Invalid web token.")
         return token
