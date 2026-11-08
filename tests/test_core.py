@@ -164,12 +164,62 @@ class StoreTests(unittest.TestCase):
                 return os.stat_result(fields)
             return metadata
 
-        with patch("pathlib.Path.lstat", new=foreign_token_owner):
+        real_fstat = os.fstat
+
+        def foreign_open_file_owner(fd):
+            fields = list(real_fstat(fd))
+            fields[4] = os.geteuid() + 100001
+            return os.stat_result(fields)
+
+        # Reads validate the opened descriptor, not the pathname; rotation
+        # independently checks the existing pathname before replacing it.
+        with patch("goreecloud_git.core.os.fstat", side_effect=foreign_open_file_owner):
             with self.assertRaisesRegex(GitError, "Missing or exposed web token"):
                 self.store.read_token()
+        with patch("pathlib.Path.lstat", new=foreign_token_owner):
             with self.assertRaisesRegex(GitError, "foreign-owned web token"):
                 self.store.rotate_token()
         self.assertEqual(self.store.read_token(), token)
+
+    def test_web_token_read_denies_path_swap_to_symlink(self):
+        valid = self.store.rotate_token()
+        path = self.store.token_path()
+        protected = Path(self.tmp.name) / "outside-token"
+        protected.write_text(valid + "\n")
+        real_open = os.open
+
+        def swap_before_open(name, flags, *args, **kwargs):
+            if Path(name) == path:
+                path.unlink()
+                path.symlink_to(protected)
+            return real_open(name, flags, *args, **kwargs)
+
+        with patch("goreecloud_git.core.os.open", side_effect=swap_before_open):
+            with self.assertRaisesRegex(GitError, "Missing or exposed web token"):
+                self.store.read_token()
+        self.assertTrue(path.is_symlink())
+        self.assertEqual(protected.read_text().strip(), valid)
+
+    def test_web_token_read_denies_special_files_without_blocking(self):
+        self.store.rotate_token()
+        path = self.store.token_path()
+        path.unlink()
+        os.mkfifo(path, mode=0o600)
+        with self.assertRaisesRegex(GitError, "Missing or exposed web token"):
+            self.store.read_token()
+        self.assertTrue(stat.S_ISFIFO(path.lstat().st_mode))
+
+    def test_web_token_read_has_strict_size_and_encoding_limits(self):
+        self.store.rotate_token()
+        path = self.store.token_path()
+        path.write_bytes(b"x" * 5000)
+        with self.assertRaisesRegex(GitError, "Invalid web token"):
+            self.store.read_token()
+        path.write_bytes(b"x" * 45 + b"\xff")
+        with self.assertRaisesRegex(GitError, "Invalid web token"):
+            self.store.read_token()
+        path.write_text("safe-" + "a" * 42 + "\n")
+        self.assertEqual(self.store.read_token(), "safe-" + "a" * 42)
 
     def test_remote_url(self):
         self.store.create("alpha")
