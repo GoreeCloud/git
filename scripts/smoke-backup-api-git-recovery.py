@@ -7,6 +7,7 @@ The caller MUST provide network isolation; no off-host or production API use.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,14 @@ def required_executable(variable: str) -> str | None:
     if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
         return None
     return str(path.resolve())
+
+
+def encrypted_repository_digests(directory: Path) -> dict[str, str]:
+    """Compare each encrypted object file before accepting a copied repository."""
+    return {
+        path.relative_to(directory).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(directory.rglob("*")) if path.is_file()
+    }
 
 
 def run(argv: list[str], *, env: dict[str, str] | None = None,
@@ -219,12 +228,8 @@ def exercise(kopia: str, backup_service: str) -> None:
             for candidate in repository.rglob("*"):
                 if candidate.is_file() and marker.encode() in candidate.read_bytes():
                     raise RuntimeError("Unencrypted synthetic marker found in Kopia repository.")
-            print("PASS: authenticated GoreeCloud Backup API -> encrypted Kopia Git snapshot "
-                  "-> fresh-cache structural and full verification -> isolated restore, "
-                  "with unauthorized/confirmation/overwrite denial, refs/config/fsck/clone "
-                  "and restored token rotation.")
-            print("Not verified: off-host copy, backup credential escrow, durable job "
-                  "scheduling, host-level RPO/RTO or production data.")
+            # Do not announce overall success until the separate encrypted
+            # repository-copy recovery phase has also passed.
         finally:
             service.terminate()
             try:
@@ -232,6 +237,131 @@ def exercise(kopia: str, backup_service: str) -> None:
             except subprocess.TimeoutExpired:
                 service.kill()
                 service.wait(timeout=5)
+
+        # A new disposable *local* encrypted repository copy stands in for
+        # separately retained storage. Never touch a real provider or remote.
+        copied_repo = root / "copied-encrypted-kopia-repository"
+        shutil.copytree(repository, copied_repo, symlinks=False)
+        original_hashes = encrypted_repository_digests(repository)
+        if not original_hashes or encrypted_repository_digests(copied_repo) != original_hashes:
+            raise RuntimeError("Encrypted Kopia repository copy differs from its source.")
+        # Quiesce/stop the original service first, then make its original
+        # data, repository and client config paths unavailable *inside only
+        # this temporary test*. No user files are deleted or overwritten.
+        repository.rename(root / "unavailable-original-repository")
+        source.rename(root / "unavailable-original-source")
+        config.rename(root / "unavailable-original-config.json")
+        if any(path.exists() for path in (repository, source, config)):
+            raise RuntimeError("Original synthetic backup paths remain accessible.")
+
+        # A fresh Kopia connection, cache, Backup API process and bearer token
+        # must recover from the independent copy, not from original paths.
+        copied_config = root / "copied-kopia-config.json"
+        copied_bin = root / "copied-bin"
+        copied_bin.mkdir(mode=0o700)
+        copied_wrapper = copied_bin / "kopia"
+        copied_wrapper.write_text(
+            "#!/bin/sh\nexec " + shlex.quote(kopia)
+            + " --config-file=" + shlex.quote(str(copied_config))
+            + ' "$@"\n', encoding="utf-8"
+        )
+        copied_wrapper.chmod(0o700)
+        recovery_env = dict(env)
+        recovery_env["PATH"] = str(copied_bin) + os.pathsep + os.defpath
+        recovery_env["GOREECLOUD_BACKUP_TOKEN"] = secrets.token_urlsafe(32)
+
+        wrong_env = dict(recovery_env)
+        wrong_env["KOPIA_PASSWORD"] = secrets.token_hex(32)
+        bad = run(
+            [kopia, "--config-file=" + str(root / "bad-password-config.json"),
+             "repository", "connect", "filesystem", "--path=" + str(copied_repo),
+             "--cache-directory=" + str(root / "bad-password-cache"),
+             "--no-check-for-updates"],
+            env=wrong_env, success=False, timeout=45,
+        )
+        if bad.returncode == 0:
+            raise RuntimeError("Copied encrypted repository accepted an incorrect password.")
+        run(
+            [str(copied_wrapper), "repository", "connect", "filesystem",
+             "--path=" + str(copied_repo),
+             "--cache-directory=" + str(root / "fresh-copied-repository-cache"),
+             "--no-check-for-updates"],
+            env=recovery_env, timeout=120,
+        )
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            second_port = probe.getsockname()[1]
+        recovery_env["GOREECLOUD_BACKUP_ADDR"] = f"127.0.0.1:{second_port}"
+        recovery_endpoint = f"http://127.0.0.1:{second_port}/api/v1/"
+        second_service = subprocess.Popen(
+            [backup_service], env=recovery_env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            for _ in range(90):
+                if second_service.poll() is not None:
+                    raise RuntimeError("Copied repository recovery API unexpectedly exited.")
+                try:
+                    status, health = api_request(
+                        recovery_endpoint, recovery_env["GOREECLOUD_BACKUP_TOKEN"],
+                        "GET", "health",
+                    )
+                    if status == 200:
+                        break
+                except (urllib.error.URLError, ConnectionError, TimeoutError):
+                    time.sleep(.15)
+            else:
+                raise RuntimeError("Copied repository recovery API did not start.")
+            if not health.get("engines", {}).get("kopia"):
+                raise RuntimeError("Recovery Backup API cannot find Kopia.")
+            new_token = recovery_env["GOREECLOUD_BACKUP_TOKEN"]
+            expect_http_status(401, recovery_endpoint, token, "GET", "health")
+            expect_http_status(401, recovery_endpoint, new_token,
+                               "GET", "health", authenticated=False)
+            wait_for_job(recovery_endpoint, new_token, "verify-structure")
+            wait_for_job(recovery_endpoint, new_token, "verify-full",
+                         confirm="VERIFY ALL BACKUPS")
+            copy_snapshots = wait_for_job(recovery_endpoint, new_token, "snapshots")
+            copied_items = json.loads(copy_snapshots.get("output", ""))
+            if not copied_items or copied_items[0]["rootEntry"]["obj"] != root_object_id:
+                raise RuntimeError("Snapshot ID differs in copied encrypted repository.")
+            second_restore = root / "restored-from-independent-copy"
+            wait_for_job(recovery_endpoint, new_token, "restore",
+                         snapshot_id=root_object_id,
+                         destination=str(second_restore), confirm="RESTORE")
+            copied_store = Store(second_restore)
+            copied_store.ready()
+            copied_bare = copied_store.existing("example")
+            copied_store.verify("example")
+            if git("--git-dir", str(copied_bare),
+                   "rev-parse", "refs/heads/main") != original_ref:
+                raise RuntimeError("Git branch ref differs after copied repository restore.")
+            for key, expected in original_config.items():
+                if git("--git-dir", str(copied_bare), "config", "--get", key) != expected:
+                    raise RuntimeError("Git protection differs after copied restore.")
+            if copied_store.read_token() != original_token:
+                raise RuntimeError("Copied repository restore lost original web token.")
+            if copied_store.rotate_token() == original_token:
+                raise RuntimeError("Copied repository restored token was not rotated.")
+            copied_clone = root / "copied-repository-clone"
+            run(["git", "clone", str(copied_bare), str(copied_clone)])
+            if (copied_clone / "fixture.txt").read_text() != marker + "\n":
+                raise RuntimeError("Copied repository Git clone contents differ.")
+        finally:
+            second_service.terminate()
+            try:
+                second_service.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                second_service.kill()
+                second_service.wait(timeout=5)
+
+        print("PASS: authenticated Backup API encrypted Git snapshot/full verification; "
+              "isolated original restore; encrypted repository copy with matching "
+              "digests; hidden original paths, wrong-password/old-token denial; "
+              "fresh-connection/fresh-cache API verification and Git restore, "
+              "refs/config/fsck/clone and restored-token rotation.")
+        print("Not verified: physical off-host storage, key escrow, durable backup "
+              "scheduling, host RPO/RTO or real private Git data.")
 
 
 def main() -> int:
