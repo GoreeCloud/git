@@ -80,7 +80,7 @@ On an authorized Linux development machine with unprivileged user, mount and net
 python3 scripts/smoke-sshd-live.py
 ```
 
-The script uses generated test-only keys and repositories, namespace-only loopback networking, and performs positive read/write and negative authentication/authorization tests. On a suitable development machine, the **stronger separate drill** `python3 scripts/smoke-sshd-strict.py` additionally uses a temporary chroot and synthetic non-root `gcgit` account with **effective `StrictModes yes`**, tests unsafe-key-directory rejection and revoked-key denial, and never modifies a real host account or SSH service. It does **not** install or expose a host service. It uses synthetic namespace root and, because the host filesystem root has unmapped ownership, disables `StrictModes` **in the synthetic fixture only**; production must use a non-root account and `StrictModes yes`. It is an opt-in drill, **not** run by normal CI. See [OpenSSH acceptance limits](docs/ssh-host-acceptance.md) before using results as evidence.
+The original `scripts/smoke-sshd-live.py` uses disposable client/server SSH keys and repositories, namespace-only loopback networking, and tests positive Git read/write and negative key/shell authorization. **Only that original synthetic-root fixture** uses `StrictModes no` inside its private namespace because its temporary root ownership is not a normal host account. The **separate stronger opt-in drill**, `python3 scripts/smoke-sshd-strict.py`, runs an actual synthetic **non-root** `gcgit` service account with effective `StrictModes yes`, testing unsafe-key-directory and revoked-key denial plus native Git operations. Both are opt-in, do not install or expose host services, and are **not run by normal CI**. Neither proves production host-account acceptance. See [OpenSSH acceptance limits](docs/ssh-host-acceptance.md).
 
 ## Per-key restricted SSH transport (development preview)
 
@@ -98,11 +98,11 @@ For a key explicitly authorized to **push to the same single repository**, add `
 
 **Choose one SSH confinement architecture:** the previous `git-shell` approach directly permits Git's standard upload/receive-pack verbs and is administered outside this program. The `gcgit serve-ssh` approach requires an SSH account login shell capable of starting the Python entrypoint (not `git-shell`); compensate with an audited `authorized_keys` forced command plus OpenSSH key restrictions, disabled password logins, and a restrictive `Match User` policy. Never claim that `git-shell` can execute this custom forced command. `restrict` blocks interactive PTY and common forwarding features for that key; validate host-wide SSH policy too.
 
-A native Git remote URL from `gcgit remote ...` is compatible with this mode when its path matches the private bare repository exactly. In testing, a local SSH-command shim exercised clone/fetch and push permissions without starting a network SSH daemon. **Real host key verification, unauthenticated-key rejection, service account isolation, rate/resource controls, and host deployment remain pending.** See [SECURITY.md](SECURITY.md) and [docs/architecture.md](docs/architecture.md).
+A native Git remote URL from `gcgit remote ...` is compatible with this mode when its path matches the private bare repository exactly. In testing, a local SSH-command shim exercised clone/fetch and push permissions without starting a network SSH daemon. **Synthetic isolated tests cover real host-key pinning, unknown/revoked keys and a non-root service identity, but actual persistent host key management, account isolation, rate/resource enforcement and deployment remain pending.** See [SECURITY.md](SECURITY.md) and [docs/architecture.md](docs/architecture.md).
 
 ### SSH staging and acceptance
 
-Before configuring a real SSH daemon or hosting private projects, follow the [reversible OpenSSH staging and security acceptance plan](docs/ssh-host-acceptance.md). It includes host-key pinning, restricted keys, denied-access tests, safeguards, and a **parser-only** optional local sshd configuration smoke test. No actual host-based SSH authorization or deployment is verified by that parser test.
+Before configuring a real SSH daemon or hosting private projects, follow the [reversible OpenSSH staging and security acceptance plan](docs/ssh-host-acceptance.md). It includes host-key pinning, restricted keys, denied-access tests, safeguards, and both parser-only and **two opt-in synthetic live OpenSSH** acceptance drills. The drills do **not** establish actual persistent-host SSH authorization or deployment.
 
 ## Optional browser (read-only)
 
@@ -120,7 +120,7 @@ ssh -N -L 8787:127.0.0.1:8787 admin@git.example.net
 # Then open http://127.0.0.1:8787 locally.
 ```
 
-Rotating the web token requires restarting the browser service. The browser now consumes verified **GoreeCloud UI v1 semantic color and layout roles**, defaults to **Light** even on a dark-preferring OS, and offers authenticated **Appearance** settings for persistent Light, Dark, or explicitly selected Follow system. The non-secret choice is saved only as a SameSite=Strict/HttpOnly cookie; it never stores Git data, credentials, or private repo history. The browser remains a **development UI** with full visual, viewport, keyboard/screen-reader and WCAG acceptance outstanding. See [GC UI consumer alignment](docs/gc-ui-consumer.md).
+Rotating the web token requires restarting the browser service. The browser now consumes verified **GoreeCloud UI v1 semantic color and layout roles**, defaults to **Light** even on a dark-preferring OS, and offers authenticated **Appearance** settings for persistent Light, Dark, or explicitly selected Follow system. The non-secret choice is saved only as a SameSite=Strict/HttpOnly cookie; it never stores Git data, credentials, or private repo history. The browser remains a **development UI**. An **opt-in real Chromium smoke** now checks authenticated read-only navigation, appearance persistence, keyboard skip link, 375/768/1440px viewport reflow and screenshot evidence in a disposable offline sandbox; the full screen-reader, cross-browser, device and WCAG acceptance gates remain open. See [GC UI consumer alignment and reproducible browser test](docs/gc-ui-consumer.md).
 
 ## Licensing
 
@@ -128,7 +128,7 @@ The original GoreeCloud Git source and documentation in this repository are lice
 
 ## Private backup and recovery integration
 
-GoreeCloud Git plans to integrate with the existing [GoreeCloud Backup](https://github.com/GoreeCloud/backup) alpha and its externally installed encrypted Kopia snapshot repository rather than developing another backup engine. Read the [disposable encrypted backup/restore acceptance procedure](docs/backup-recovery.md), including the important requirements to quiesce writes, protect token-bearing snapshots, restore into a new root and test Git refs/clone. **No live encrypted Git backup or restore has been verified.**
+GoreeCloud Git plans to integrate with the existing [GoreeCloud Backup](https://github.com/GoreeCloud/backup) alpha and its externally installed encrypted Kopia snapshot repository rather than developing another backup engine. Read the [disposable encrypted backup/restore acceptance procedure](docs/backup-recovery.md), including the important requirements to quiesce writes, protect token-bearing snapshots, restore into a new root and test Git refs/clone. **Synthetic live encrypted local** Kopia and authenticated GoreeCloud Backup API snapshot/restore drills have passed, including restoration from a **separate same-host copy** of encrypted storage when original test paths are unavailable. **No physical off-host production backup, key escrow or recovery of actual private Git repositories** has been verified.
 
 ## Test
 
@@ -145,9 +145,9 @@ Read [SECURITY.md](SECURITY.md) and [docs/architecture.md](docs/architecture.md)
 
 ## Next milestones
 
-1. Independent security and restore testing; test a real SSH key-based push/clone on an authorized host.
+1. Complete **actual persistent non-root host** SSH authorization/network acceptance and physically off-host encrypted restore with independently recoverable keys; isolated synthetic live SSH and local Backup API recovery drills already pass.
 2. A restricted service-account installer, encrypted backups and restore drills, safe per-user permissions, audit logs and rate limiting.
-3. Canonical GC UI token/component integration, accessible browser QA and an optional remote administration API with authentication, CSRF protections, scopes, and replay protection.
+3. Broaden the existing canonical GC UI consumer and verified Chromium browser acceptance to Firefox, screen readers, real devices, zoom/forced colors and an approved private access path before any optional scoped remote administration API.
 4. Repository quotas and management, signed releases, contributor workflows, Git LFS and an optional issues/PR layer.
 
 Built as an original source foundation, without third-party application source or fabricated deployment claims. Source and documentation are released under the MIT License; see [LICENSE](LICENSE). This choice applies only to original repository content and does not relicense third-party material.
