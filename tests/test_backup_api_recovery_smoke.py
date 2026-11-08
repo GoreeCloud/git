@@ -42,6 +42,20 @@ class BackupAPIRecoveryHarnessTests(unittest.TestCase):
                     self.assertEqual(smoke.main(), 77)
                 self.assertIn("SKIP", out.getvalue())
 
+    def test_encrypted_repository_copy_digest_comparison_detects_changes(self):
+        with tempfile.TemporaryDirectory() as td:
+            original = Path(td) / "original"
+            copied = Path(td) / "copied"
+            (original / "p").mkdir(parents=True)
+            (copied / "p").mkdir(parents=True)
+            (original / "p" / "blob").write_bytes(b"encrypted synthetic bytes")
+            (copied / "p" / "blob").write_bytes(b"encrypted synthetic bytes")
+            expected = smoke.encrypted_repository_digests(original)
+            self.assertTrue(expected)
+            self.assertEqual(expected, smoke.encrypted_repository_digests(copied))
+            (copied / "p" / "blob").write_bytes(b"modified ciphertext")
+            self.assertNotEqual(expected, smoke.encrypted_repository_digests(copied))
+
     def test_arg_injection_is_rejected(self):
         with patch.object(sys, "argv", [str(SCRIPT), "--extra"]):
             with self.assertRaises(ValueError):
