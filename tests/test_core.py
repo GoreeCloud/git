@@ -119,6 +119,58 @@ class StoreTests(unittest.TestCase):
             self.store.init()
         self.assertEqual(stat.S_IMODE(self.store.root.stat().st_mode), 0o755)
 
+    def test_storage_root_rejects_foreign_owner_before_creating_any_repo(self):
+        current_uid = os.geteuid()
+        before = self.store.root.stat()
+        with patch("goreecloud_git.core.os.geteuid", return_value=current_uid + 100001):
+            with self.assertRaisesRegex(GitError, "current account"):
+                self.store.ready()
+            with self.assertRaisesRegex(GitError, "current account"):
+                self.store.create("not-created")
+        self.assertFalse(self.store.path("not-created").exists())
+        self.assertEqual(self.store.root.stat().st_uid, before.st_uid)
+        self.assertEqual(stat.S_IMODE(self.store.root.stat().st_mode), 0o700)
+
+    def test_repository_rejects_foreign_owner_without_mutating_it(self):
+        bare = self.store.create("owned")
+        real_lstat = Path.lstat
+
+        def foreign_repo_owner(path, *args, **kwargs):
+            metadata = real_lstat(path, *args, **kwargs)
+            if path == bare:
+                fields = list(metadata)
+                fields[4] = os.geteuid() + 100001
+                return os.stat_result(fields)
+            return metadata
+
+        with patch("pathlib.Path.lstat", new=foreign_repo_owner):
+            with self.assertRaisesRegex(GitError, "current account"):
+                self.store.existing("owned")
+            self.assertIn("owned", self.store.inventory_issues())
+        self.assertTrue(bare.is_dir())
+        self.assertEqual(bare.stat().st_uid, os.geteuid())
+        self.store.verify("owned")
+
+    def test_foreign_owned_token_is_not_read_or_replaced(self):
+        token = self.store.rotate_token()
+        target = self.store.token_path()
+        real_lstat = Path.lstat
+
+        def foreign_token_owner(path, *args, **kwargs):
+            metadata = real_lstat(path, *args, **kwargs)
+            if path == target:
+                fields = list(metadata)
+                fields[4] = os.geteuid() + 100001
+                return os.stat_result(fields)
+            return metadata
+
+        with patch("pathlib.Path.lstat", new=foreign_token_owner):
+            with self.assertRaisesRegex(GitError, "Missing or exposed web token"):
+                self.store.read_token()
+            with self.assertRaisesRegex(GitError, "foreign-owned web token"):
+                self.store.rotate_token()
+        self.assertEqual(self.store.read_token(), token)
+
     def test_remote_url(self):
         self.store.create("alpha")
         self.assertEqual(self.store.ssh_url("alpha", "git.example.test", "gcgit", 2222),

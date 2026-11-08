@@ -137,6 +137,15 @@ def fixture() -> None:
     for repo in (alpha, store.path("other")):
         if stat.S_IMODE(repo.stat().st_mode) != 0o700:
             raise RuntimeError("Bare repository mode is not private.")
+    # The setup account (synthetic namespace UID 0) must now be denied
+    # access to repositories transferred to the synthetic service account.
+    from goreecloud_git.core import GitError
+    try:
+        store.ready()
+    except GitError:
+        pass
+    else:
+        raise RuntimeError("Foreign-owned private Git storage was accepted.")
     for name in ("host", "read", "write", "unknown"):
         run("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", f"/tmp/{name}")
     pubhost = Path("/tmp/host.pub").read_text().split()
@@ -288,7 +297,11 @@ def fixture() -> None:
                                    + good.stderr[-300:] + " sshd:" + log_path.read_text()[-750:])
             if git("--git-dir", str(alpha), "rev-parse", "refs/heads/main") != proposed:
                 raise RuntimeError("Authorized write did not update ref.")
-            store.verify("alpha")
+            # Verify integrity from the actual synthetic service identity,
+            # not privileged namespace UID 0 after it transferred ownership.
+            run("/usr/bin/setpriv", "--reuid=1001", "--regid=1001",
+                "--clear-groups", "/usr/bin/python3", "-m",
+                "goreecloud_git.cli", "--root", str(store.root), "verify", "alpha")
             print("PASS: synthetic non-root SSH account with effective StrictModes yes; "
                   "pinned-host clone, wrong/unknown key denial, active unsafe-mode "
                   "rejection, revoked-key denial, shell/cross-repo/read-only denial, "
