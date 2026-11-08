@@ -90,9 +90,17 @@ def git(*args: str, timeout: int = 12, max_output: int = 1048576) -> str:
         proc.wait()
 
 def private_directory(path: Path) -> None:
-    if path.is_symlink() or not path.is_dir():
+    # Inspect the directory entry itself. A private mode alone is not proof
+    # that the service account owns this restored or reattached storage.
+    try:
+        entry = path.lstat()
+    except OSError as exc:
+        raise GitError(f"Missing or unsafe storage directory: {path}") from exc
+    if not stat.S_ISDIR(entry.st_mode):
         raise GitError(f"Missing or unsafe storage directory: {path}")
-    if stat.S_IMODE(path.stat().st_mode) & 0o077:
+    if entry.st_uid != os.geteuid():
+        raise GitError(f"Storage directory must belong to the current account: {path}")
+    if stat.S_IMODE(entry.st_mode) & 0o077:
         raise GitError(f"Storage directory must be private (0700): {path}")
 
 class Store:
@@ -235,6 +243,10 @@ class Store:
         dest = self.token_path()
         if dest.is_symlink():
             raise GitError("Web token path is a symlink.")
+        if dest.exists():
+            existing = dest.lstat()
+            if not stat.S_ISREG(existing.st_mode) or existing.st_uid != os.geteuid():
+                raise GitError("Unsafe or foreign-owned web token path.")
         token = secrets.token_urlsafe(36)
         fd, tmp = tempfile.mkstemp(prefix=".web-token-", dir=self.root)
         try:
@@ -251,7 +263,12 @@ class Store:
 
     def read_token(self) -> str:
         dest = self.token_path()
-        if dest.is_symlink() or not dest.is_file() or stat.S_IMODE(dest.stat().st_mode) & 0o077:
+        try:
+            entry = dest.lstat()
+        except OSError as exc:
+            raise GitError("Missing or exposed web token. Run 'gcgit web-token'.") from exc
+        if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid()
+                or stat.S_IMODE(entry.st_mode) & 0o077):
             raise GitError("Missing or exposed web token. Run 'gcgit web-token'.")
         token = dest.read_text(encoding="ascii").strip()
         if len(token) < 40:
