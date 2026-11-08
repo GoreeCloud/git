@@ -70,6 +70,89 @@ async function waitUntilReady(url, token, child) {
   throw new Error("Disposable UI server failed its authenticated health probe.");
 }
 
+async function assertSampledTextContrast(page, mode, pairs) {
+  // Browser-computed, opaque foreground/background samples only. This is
+  // deliberately not an exhaustive alpha-composited WCAG audit.
+  const outcomes = await page.evaluate((samples) => {
+    function rgb(css) {
+      const match = /^rgba?\(([^)]+)\)$/.exec(css);
+      if (!match) throw new Error("Unexpected browser color format");
+      const values = match[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+      if (values.length < 3 || values.slice(0, 3).some((v) => !Number.isFinite(v))
+          || (values.length >= 4 && values[3] !== 1)) {
+        throw new Error("Non-opaque contrast sample");
+      }
+      return values.slice(0, 3);
+    }
+    function luminance(values) {
+      const linear = values.map((v) => {
+        const x = v / 255;
+        return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+      });
+      return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+    }
+    return samples.map(({foreground, background}) => {
+      const a = document.querySelector(foreground);
+      const b = document.querySelector(background);
+      if (!a || !b) throw new Error("Missing expected contrast sample");
+      const fg = luminance(rgb(getComputedStyle(a).color));
+      const bg = luminance(rgb(getComputedStyle(b).backgroundColor));
+      return {foreground, background,
+        ratio: (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05)};
+    });
+  }, pairs);
+  for (const sample of outcomes) {
+    assert.ok(sample.ratio >= 4.5,
+      mode + " browser-computed text contrast below 4.5:1 for "
+      + sample.foreground + " / " + sample.background
+      + " (" + sample.ratio.toFixed(2) + ":1)");
+  }
+  console.log("PASS " + mode + " " + outcomes.length
+    + " sampled opaque browser-computed text contrast pairs >= 4.5:1.");
+}
+
+async function auditWithAvailableAxe(page, name, phase, evidenceDir) {
+  // This diagnostic depends on the operator's already installed axe-core.
+  // It is not a shipping dependency and never calls an external service.
+  let axe;
+  try {
+    axe = require("axe-core");
+  } catch (error) {
+    if (error.code === "MODULE_NOT_FOUND"
+        && String(error.message).includes("Cannot find module 'axe-core'")) {
+      console.log("SKIP: axe-core not installed; automated A/AA screen is optional.");
+      return;
+    }
+    throw error;
+  }
+  await page.evaluate(axe.source);
+  const result = await page.evaluate(async () => {
+    if (!window.axe) throw new Error("Axe diagnostics failed to initialize.");
+    const report = await window.axe.run(document, {
+      runOnly: {type: "tag",
+        values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]},
+    });
+    return {
+      passes: report.passes.length,
+      violations: report.violations.map((item) => ({
+        id: item.id, impact: item.impact, nodes: item.nodes.length,
+      })),
+      incomplete: report.incomplete.map((item) => ({
+        id: item.id, impact: item.impact, nodes: item.nodes.length,
+      })),
+    };
+  });
+  // Keep only counts/rule IDs and never write credentials or page content.
+  fs.writeFileSync(path.join(evidenceDir, name + "-" + phase + "-axe.json"),
+    JSON.stringify({engine: "axe-core " + axe.version, page: phase, ...result}, null, 2) + "\n",
+    {encoding: "utf8", mode: 0o600});
+  assert.deepEqual(result.violations, [],
+    "Automated A/AA violations on " + phase + ": " + JSON.stringify(result.violations));
+  console.log("PASS " + phase + " axe-core " + axe.version + ": "
+    + result.passes + " passed rules, zero detected violations, "
+    + result.incomplete.length + " incomplete rules within this screen; manual review still required.");
+}
+
 async function acceptBrowser(name, browserType, url, token, evidenceDir, port) {
   const options = {headless: true, timeout: 15000};
   // Chromium's *inner* sandbox is unavailable inside this unprivileged
@@ -129,7 +212,11 @@ async function acceptBrowser(name, browserType, url, token, evidenceDir, port) {
       await page.getByRole("navigation", {name: "Primary navigation"})
         .getByRole("link", {name: "Repositories"}).click();
 
-      const widths = [375, 768, 1440];
+      // WCAG 1.4.10 reflow: a 320-CSS-pixel layout corresponds to a
+      // 1280-physical-pixel desktop narrowed by a 400% browser zoom.
+      // These viewport tests DO NOT change the browser's actual zoom setting;
+      // do not claim a native 400%-zoom test based on them alone.
+      const widths = [320, 375, 640, 768, 1440];
       for (const width of widths) {
         const height = width === 375 ? 812 : width === 768 ? 1024 : 900;
         await page.setViewportSize({width, height});
@@ -140,10 +227,95 @@ async function acceptBrowser(name, browserType, url, token, evidenceDir, port) {
         assert.ok(overflow <= 1, "Horizontal overflow at " + width + "px: " + overflow);
         const heading = page.getByRole("heading", {name: "Private repositories"});
         assert.equal(await heading.isVisible(), true);
+        // No repository card or navigation action may be clipped outside
+        // the viewport; a bare document-width check can miss position-fixed
+        // or overflow-hidden content.
+        for (const locator of [
+          page.getByRole("link", {name: "example"}),
+          page.getByRole("link", {name: "Appearance"}),
+        ]) {
+          const bounds = await locator.boundingBox();
+          assert.ok(bounds && bounds.width > 0 && bounds.x >= -1
+            && bounds.x + bounds.width <= width + 1,
+            "Interactive link is outside " + width + "px layout");
+        }
         await page.screenshot({path: path.join(evidenceDir, name + "-home-" + width + ".png")});
       }
 
+      await assertSampledTextContrast(page, "light", [
+        {foreground: ".brand", background: "header"},
+        {foreground: ".hero h1", background: ".hero"},
+        {foreground: ".hero p", background: ".hero"},
+        {foreground: ".hero .eyebrow", background: ".hero"},
+        {foreground: ".card h2 a", background: ".card"},
+        {foreground: ".card .muted", background: ".card"},
+        {foreground: "footer", background: "body"},
+      ]);
+      await auditWithAvailableAxe(page, name, "home", evidenceDir);
+
+      // Real Chromium forced-colors media rendering. System color names are
+      // expected to resolve to platform colors; focus/underlines must remain
+      // discoverable even if the browser overrides author background colors.
+      await page.setViewportSize({width: 375, height: 812});
+      await page.emulateMedia({forcedColors: "active", colorScheme: "light"});
+      assert.equal(await page.evaluate(
+        () => matchMedia("(forced-colors: active)").matches), true);
+      assert.equal(await page.getByRole("link", {name: "example"}).isVisible(), true);
+      assert.equal(await page.getByRole("link", {name: "example"})
+        .evaluate((el) => getComputedStyle(el).textDecorationLine.includes("underline")), true);
+      await page.getByRole("link", {name: "example"}).focus();
+      const focusedOutline = await page.getByRole("link", {name: "example"})
+        .evaluate((el) => getComputedStyle(el).outlineStyle);
+      assert.equal(focusedOutline, "solid", "Forced-colors focus ring must remain visible.");
+      await page.screenshot({
+        path: path.join(evidenceDir, name + "-home-forced-colors.png"),
+      });
+      await page.emulateMedia({forcedColors: "none", colorScheme: "light"});
+      assert.equal(await page.evaluate(
+        () => matchMedia("(forced-colors: active)").matches), false);
+
+      // Dynamic CSS root-text enlargement is a real rendered-browser
+      // stress case, but NOT the browser's native page-zoom control.
+      // Test 200% and 400% separately at adequate CSS viewport widths.
+      for (const [scale, viewportWidth] of [[2, 640], [4, 1280]]) {
+        await page.setViewportSize({width: viewportWidth, height: 900});
+        const measured = await page.evaluate((amount) => {
+          document.documentElement.style.fontSize = String(amount * 100) + "%";
+          return {
+            bodyFontPx: parseFloat(getComputedStyle(document.body).fontSize),
+            overflowPx: Math.max(document.documentElement.scrollWidth,
+              document.body.scrollWidth) - document.documentElement.clientWidth,
+          };
+        }, scale);
+        assert.ok(Math.abs(measured.bodyFontPx - 16 * scale) < 1,
+          "Body text did not scale with the root font size at " + scale + "x.");
+        assert.ok(measured.overflowPx <= 1,
+          "Text-scale horizontal overflow at " + scale + "x: " + measured.overflowPx);
+        assert.equal(await page.getByRole("heading", {name: "Private repositories"}).isVisible(), true);
+        await page.screenshot({
+          path: path.join(evidenceDir, name + "-home-root-text-" + scale + "x.png"),
+        });
+      }
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = "";
+      });
+      await page.setViewportSize({width: 375, height: 812});
+
       await page.getByRole("link", {name: "Appearance"}).click();
+      await page.setViewportSize({width: 320, height: 812});
+      const narrowSettings = await page.evaluate(() =>
+        Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)
+        - document.documentElement.clientWidth);
+      assert.ok(narrowSettings <= 1, "Settings horizontal overflow at 320px.");
+      for (const buttonName of ["Save appearance", "Reset to Light"]) {
+        const rect = await page.getByRole("button", {name: buttonName}).boundingBox();
+        assert.ok(rect && rect.x >= -1 && rect.x + rect.width <= 321,
+          "Settings button clipped at 320px: " + buttonName);
+      }
+      await page.screenshot({
+        path: path.join(evidenceDir, name + "-appearance-320.png"),
+      });
+      await page.setViewportSize({width: 1440, height: 900});
       assert.equal(await page.getByRole("radio", {name: "Light"}).isChecked(), true);
       await page.getByRole("radio", {name: "Dark"}).check();
       const suppliedCsrf = await page.locator("form.card input[name=csrf]").inputValue();
@@ -166,6 +338,16 @@ async function acceptBrowser(name, browserType, url, token, evidenceDir, port) {
       await page.waitForLoadState("load");
       assert.equal(await page.locator("html").getAttribute("data-gc-mode"), "dark");
       await page.screenshot({path: path.join(evidenceDir, name + "-appearance-dark.png")});
+      await assertSampledTextContrast(page, "dark", [
+        {foreground: ".brand", background: "header"},
+        {foreground: ".hero h1", background: ".hero"},
+        {foreground: ".hero p", background: ".hero"},
+        {foreground: ".card legend", background: ".card"},
+        {foreground: ".choice", background: ".choice"},
+        {foreground: "button", background: "button"},
+        {foreground: "footer", background: "body"},
+      ]);
+      await auditWithAvailableAxe(page, name, "appearance-dark", evidenceDir);
       await page.reload();
       assert.equal(await page.locator("html").getAttribute("data-gc-mode"), "dark");
       await page.getByRole("button", {name: "Reset to Light"}).click();
@@ -180,8 +362,9 @@ async function acceptBrowser(name, browserType, url, token, evidenceDir, port) {
       assert.deepEqual(errors, [], "No runtime page errors");
       assert.deepEqual(externalRequests, [], "No external network requests");
       console.log("PASS " + name + " " + browser.version()
-        + ": private HTTP auth, real native Git history, skip-link keyboard,"
-        + " 375/768/1440 reflow, 44px control, light/dark/auto and reset.");
+        + ": owner authentication, native Git history, keyboard skip link,"
+        + " 320/375/640/768/1440 reflow, forced colors, 2x/4x root text,"
+        + " scoped contrast and optional axe, Light/Dark/Auto/reset.");
     } finally {
       await context.close();
     }
@@ -240,7 +423,8 @@ async function main() {
       await acceptBrowser(engineName, pw[engineName], url, token, evidence, port);
     }
     console.log("PASS: real-browser UI acceptance completed with synthetic data.");
-    console.log("NOT VERIFIED: screen reader, mobile OS, production TLS/tunnel, full WCAG.");
+    console.log("NOT VERIFIED: native 200-400% browser zoom, human assistive technology,"
+      + " Firefox/Safari, real mobile OS, production TLS/tunnel or full WCAG.");
   } finally {
     if (server && server.exitCode === null) server.kill("SIGTERM");
     fs.rmSync(temp, {recursive: true, force: true});
